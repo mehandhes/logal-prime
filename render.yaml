@@ -1,0 +1,35 @@
+# Configuración para despliegue en Render.com
+# Documentación: https://render.com/docs/blueprint-spec
+
+services:
+  # Backend API
+  - type: web
+    name: logal-prime-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false  # Debes configurarlo manualmente en Render
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        value: https://logal-prime.onrender.com
+
+  # Frontend (Static Site)
+  - type: web
+    name: logal-prime
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://logal-prime-api.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -25,22 +25,38 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'LOGAL Prime API running' });
 });
 
-// Connect to MongoDB
-const PORT = process.env.PORT || 5000;
+// MongoDB - conexión con caché para serverless
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/logal-prime';
+let cachedConnection = null;
 
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    console.log('✅ MongoDB conectado');
-    if (require.main === module) {
-      app.listen(PORT, () => {
-        console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-      });
-    }
-  })
-  .catch(err => {
-    console.error('❌ Error conectando MongoDB:', err.message);
-    process.exit(1);
+async function connectDB() {
+  if (cachedConnection && mongoose.connection.readyState === 1) {
+    return cachedConnection;
+  }
+  cachedConnection = await mongoose.connect(MONGODB_URI, {
+    serverSelectionTimeoutMS: 8000,
   });
+  console.log('✅ MongoDB conectado');
+  return cachedConnection;
+}
+
+// Middleware que conecta DB antes de cada request
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('❌ Error MongoDB:', err.message);
+    res.status(503).json({ error: 'Database unavailable' });
+  }
+});
+
+// Arranque local
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  connectDB().then(() => {
+    app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+  });
+}
 
 module.exports = app;

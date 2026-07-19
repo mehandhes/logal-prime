@@ -25,18 +25,22 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'LOGAL Prime API running' });
 });
 
-// Connect to MongoDB and start server
+// Connect to MongoDB
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/logal-prime';
 
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ MongoDB conectado');
-    app.listen(PORT, () => {
-      console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-    });
+    if (require.main === module) {
+      app.listen(PORT, () => {
+        console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+      });
+    }
   })
-  .catch((err) => {
+  .catch(err => {
     console.error('❌ Error conectando MongoDB:', err.message);
     process.exit(1);
   });
+
+module.exports = app;

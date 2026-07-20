@@ -5,22 +5,14 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// Middleware
+// Middleware básico
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
   credentials: true
 }));
 app.use(express.json());
 
-// Routes
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/vehicles', require('./routes/vehicles'));
-app.use('/api/registros', require('./routes/registros'));
-app.use('/api/pagos', require('./routes/pagos'));
-app.use('/api/mantenimiento', require('./routes/mantenimiento'));
-app.use('/api/stats', require('./routes/stats'));
-
-// Health check
+// Health check (no requiere DB)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'LOGAL Prime API running' });
 });
@@ -30,9 +22,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/logal-
 let cachedConnection = null;
 
 async function connectDB() {
-  if (cachedConnection && mongoose.connection.readyState === 1) {
-    return cachedConnection;
-  }
+  if (cachedConnection && mongoose.connection.readyState === 1) return cachedConnection;
   cachedConnection = await mongoose.connect(MONGODB_URI, {
     serverSelectionTimeoutMS: 8000,
   });
@@ -40,7 +30,7 @@ async function connectDB() {
   return cachedConnection;
 }
 
-// Middleware que conecta DB antes de cada request
+// Middleware DB (ANTES de las rutas)
 app.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -50,6 +40,14 @@ app.use(async (req, res, next) => {
     res.status(503).json({ error: 'Database unavailable' });
   }
 });
+
+// Routes (DESPUÉS del middleware DB)
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/vehicles', require('./routes/vehicles'));
+app.use('/api/registros', require('./routes/registros'));
+app.use('/api/pagos', require('./routes/pagos'));
+app.use('/api/mantenimiento', require('./routes/mantenimiento'));
+app.use('/api/stats', require('./routes/stats'));
 
 // Arranque local
 if (require.main === module) {

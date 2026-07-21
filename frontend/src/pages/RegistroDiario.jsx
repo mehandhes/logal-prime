@@ -112,7 +112,7 @@ export default function RegistroDiario() {
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Movimientos
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
             Registro Diario
           </h1>
         </div>

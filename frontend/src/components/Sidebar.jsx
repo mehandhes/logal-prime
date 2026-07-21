@@ -38,22 +38,23 @@ export default function Sidebar() {
       overflowY: 'auto'
     }}>
       {/* Logo */}
-      <div style={{ marginBottom: '44px' }}>
+      <div style={{ marginBottom: '36px' }}>
+        <img
+          src="/logo.png"
+          alt="LOGAL Prime"
+          style={{
+            width: '180px',
+            height: 'auto',
+            display: 'block',
+            marginBottom: '6px'
+          }}
+        />
         <div style={{
-          fontFamily: "'Playfair Display', serif",
-          fontSize: '23px',
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-          color: '#FFFFFF'
-        }}>
-          LOGAL <span style={{ color: '#C5C6C7' }}>Prime</span>
-        </div>
-        <div style={{
-          fontSize: '10.5px',
+          fontSize: '10px',
           letterSpacing: '0.16em',
           textTransform: 'uppercase',
           color: '#7C8994',
-          marginTop: '6px'
+          fontFamily: "'Montserrat', sans-serif"
         }}>
           Transporte Ejecutivo
         </div>

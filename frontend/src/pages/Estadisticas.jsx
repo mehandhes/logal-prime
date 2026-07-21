@@ -51,7 +51,7 @@ export default function Estadisticas() {
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Análisis
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
             Estadísticas y Proyecciones
           </h1>
         </div>
@@ -85,7 +85,7 @@ export default function Estadisticas() {
         ].map(c => (
           <div key={c.label} style={cardStyle}>
             <div style={{ fontSize: '12px', color: '#8B98A3', marginBottom: '10px' }}>{c.label}</div>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', fontWeight: 600, color: '#FFFFFF' }}>
+            <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '24px', fontWeight: 600, color: '#FFFFFF' }}>
               {c.value}
             </div>
             {c.sub && <div style={{ fontSize: '11.5px', color: '#7C8994', marginTop: '4px' }}>{c.sub}</div>}

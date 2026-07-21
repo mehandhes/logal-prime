@@ -49,7 +49,7 @@ export default function Vehiculos() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>Flota</div>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>Vehículos</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>Vehículos</h1>
         </div>
         <button onClick={() => { setShowForm(true); setEditId(null); }} style={btnPrimary}>+ Agregar Vehículo</button>
       </div>

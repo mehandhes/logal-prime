@@ -18,7 +18,7 @@ function KPICard({ label, value, delta, sub, deltaPositive }) {
     }}>
       <div style={{ fontSize: '12px', color: '#8B98A3', marginBottom: '14px', fontWeight: 500 }}>{label}</div>
       <div style={{
-        fontFamily: "'Playfair Display', serif",
+        fontFamily: "'Montserrat', sans-serif",
         fontSize: '27px',
         fontWeight: 600,
         color: '#FFFFFF',
@@ -97,7 +97,7 @@ export default function Dashboard() {
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Panel General
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
             Dashboard
           </h1>
         </div>
@@ -219,7 +219,7 @@ export default function Dashboard() {
               position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center'
             }}>
-              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '20px', fontWeight: 700, color: '#FFFFFF' }}>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '20px', fontWeight: 700, color: '#FFFFFF' }}>
                 {kpis.margenPct}%
               </div>
               <div style={{ fontSize: '9.5px', color: '#7C8994', letterSpacing: '0.04em' }}>MARGEN</div>
@@ -246,7 +246,7 @@ export default function Dashboard() {
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#FFFFFF', marginBottom: '6px' }}>Proyección Semanal</div>
           <div style={{ fontSize: '11.5px', color: '#7C8994', marginBottom: '18px' }}>Al ritmo del período</div>
           <div style={{
-            fontFamily: "'Playfair Display', serif",
+            fontFamily: "'Montserrat', sans-serif",
             fontSize: '24px', fontWeight: 600, color: '#FFFFFF', marginBottom: '6px'
           }}>
             {fmtShort(kpis.proyeccionSemanal)}
@@ -288,7 +288,7 @@ export default function Dashboard() {
                 <strong style={{ color: '#FFFFFF' }}>{m.tipo}</strong> · {m.placa || m.vehiculo?.placa}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '16px', fontWeight: 700, color: '#FFFFFF' }}>
+                <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '16px', fontWeight: 700, color: '#FFFFFF' }}>
                   {fmt(m.costo)}
                 </div>
                 <div style={{ fontSize: '11.5px', color: '#93A0AB' }}>{fmtDate(m.fecha)}</div>

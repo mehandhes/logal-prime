@@ -83,7 +83,7 @@ export default function Mantenimiento() {
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Flota
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Playfair Display', serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
             Mantenimiento
           </h1>
         </div>
@@ -101,7 +101,7 @@ export default function Mantenimiento() {
         ].map(c => (
           <div key={c.label} style={cardStyle}>
             <div style={{ fontSize: '12px', color: '#8B98A3', marginBottom: '10px' }}>{c.label}</div>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '24px', fontWeight: 600, color: c.color }}>
+            <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '24px', fontWeight: 600, color: c.color }}>
               {c.value}
             </div>
           </div>
@@ -205,7 +205,7 @@ export default function Mantenimiento() {
               <div style={{ fontSize: '12px', color: '#7C8994', marginBottom: '8px' }}>Taller: {item.taller}</div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid rgba(197,198,199,0.08)' }}>
-              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: '18px', fontWeight: 700, color: '#FFFFFF' }}>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '18px', fontWeight: 700, color: '#FFFFFF' }}>
                 {fmt(item.costo)}
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>

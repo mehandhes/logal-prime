@@ -45,21 +45,23 @@ export default function Login() {
       <div style={{ width: '100%', maxWidth: '400px' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '48px' }}>
-          <div style={{
-            fontFamily: "'Playfair Display', serif",
-            fontSize: '36px',
-            fontWeight: 600,
-            letterSpacing: '0.04em',
-            color: '#FFFFFF',
-            marginBottom: '8px'
-          }}>
-            LOGAL <span style={{ color: '#C5C6C7' }}>Prime</span>
-          </div>
+          <img
+            src="/logo.png"
+            alt="LOGAL Prime"
+            style={{
+              width: '220px',
+              height: 'auto',
+              marginBottom: '12px',
+              display: 'block',
+              margin: '0 auto 12px auto'
+            }}
+          />
           <div style={{
             fontSize: '11px',
             letterSpacing: '0.18em',
             textTransform: 'uppercase',
-            color: '#7C8994'
+            color: '#7C8994',
+            fontFamily: "'Montserrat', sans-serif"
           }}>
             Sistema Contable · Transporte Ejecutivo
           </div>
@@ -76,7 +78,8 @@ export default function Login() {
             fontSize: '18px',
             fontWeight: 600,
             color: '#FFFFFF',
-            marginBottom: '28px'
+            marginBottom: '28px',
+            fontFamily: "'Montserrat', sans-serif"
           }}>
             {mode === 'login' ? 'Iniciar sesión' : 'Configurar administrador'}
           </h2>

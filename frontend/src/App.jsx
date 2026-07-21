@@ -21,7 +21,7 @@ function ProtectedLayout({ children }) {
         display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}>
         <div style={{
-          fontFamily: "'Playfair Display', serif",
+          fontFamily: "'Montserrat', sans-serif",
           fontSize: '32px', color: '#C5C6C7', letterSpacing: '0.04em'
         }}>
           LOGAL Prime

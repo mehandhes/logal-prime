@@ -83,7 +83,13 @@ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
         <img
           src="/logo.png"
           alt="LOGAL Prime"
-          style={{ width: '160px', height: 'auto', display: 'block', marginBottom: '6px' }}
+          style={{
+            width: isMobile ? '240px' : '160px',
+            maxWidth: '100%',
+            height: 'auto',
+            display: 'block',
+            marginBottom: '6px'
+          }}
         />
         <div style={{
           fontSize: '10px', letterSpacing: '0.16em',

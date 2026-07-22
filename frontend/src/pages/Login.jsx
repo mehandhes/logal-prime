@@ -49,9 +49,9 @@ export default function Login() {
             src="/logo.png"
             alt="LOGAL Prime"
             style={{
-              width: '220px',
+              width: '440px',
+              maxWidth: '95%',
               height: 'auto',
-              marginBottom: '12px',
               display: 'block',
               margin: '0 auto 12px auto'
             }}

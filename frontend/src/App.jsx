@@ -25,7 +25,7 @@ function MobileTopBar({ onMenuClick }) {
     <div
       className="mobile-top-bar"
       style={{
-        position: 'fixed', top: 0, left: 0, right: 0, height: '56px',
+        position: 'fixed', top: 0, left: 0, right: 0, height: '68px',
         background: '#111319', borderBottom: '1px solid rgba(197,198,199,0.12)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 16px', zIndex: 150,
@@ -42,7 +42,7 @@ function MobileTopBar({ onMenuClick }) {
       >
         ☰
       </button>
-      <img src="/logo.png" alt="LOGAL Prime" style={{ height: '32px', width: 'auto' }} />
+      <img src="/logo.png" alt="LOGAL Prime" style={{ height: '52px', width: 'auto' }} />
       <div style={{ width: '38px' }} /> {/* Spacer to center logo */}
     </div>
   );

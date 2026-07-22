@@ -92,7 +92,7 @@ export default function Dashboard() {
   const maxEgreso = Math.max(...egresoBreakdown.map(b => b.valor), 1);
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '84px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',

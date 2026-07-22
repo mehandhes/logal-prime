@@ -79,7 +79,7 @@ export default function Mantenimiento() {
   const pendientes = items.filter(i => i.estado !== 'completado');
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '84px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
       <div style={{
         display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
         flexDirection: isMobile ? 'column' : 'row',

@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import api, { fmt, fmtShort, fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const COLORS = { ingresos: '#C5C6C7', egresos: '#3D4A55', utilidad: '#8FD9B0' };
 
@@ -62,6 +63,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function Dashboard() {
   const { selectedVehicle } = useVehicles();
+  const isMobile = useIsMobile();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -90,23 +92,27 @@ export default function Dashboard() {
   const maxEgreso = Math.max(...egresoBreakdown.map(b => b.valor), 1);
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px', overflowX: 'auto' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Panel General
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
             Dashboard
           </h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ padding: '9px 16px', border: '1px solid rgba(197,198,199,0.22)', borderRadius: '9px', fontSize: '13px', color: '#C5C6C7' }}>
-            Semana actual · {fechaLabel}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ padding: '7px 12px', border: '1px solid rgba(197,198,199,0.22)', borderRadius: '9px', fontSize: '12px', color: '#C5C6C7' }}>
+            {fechaLabel}
           </div>
           {selectedVehicle && (
-            <div style={{ padding: '9px 16px', background: '#1F2833', borderRadius: '9px', fontSize: '13px', color: '#FFFFFF', fontWeight: 600 }}>
+            <div style={{ padding: '7px 12px', background: '#1F2833', borderRadius: '9px', fontSize: '12px', color: '#FFFFFF', fontWeight: 600 }}>
               {selectedVehicle.placa}
             </div>
           )}
@@ -303,7 +309,7 @@ export default function Dashboard() {
 
 function LoadingState() {
   return (
-    <main style={{ flex: 1, padding: '36px 44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <main style={{ flex: 1, padding: '36px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ textAlign: 'center', color: '#7C8994' }}>
         <div style={{ fontSize: '32px', marginBottom: '16px' }}>⟳</div>
         <div>Cargando dashboard...</div>

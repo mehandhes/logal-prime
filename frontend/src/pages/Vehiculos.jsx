@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import api, { fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export default function Vehiculos() {
   const { vehicles, setVehicles } = useVehicles();
+  const isMobile = useIsMobile();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ placa: '', nombre: '', marca: '', modelo: '', año: '', conductor: '', kmActual: '', observaciones: '' });
   const [editId, setEditId] = useState(null);
@@ -45,11 +47,15 @@ export default function Vehiculos() {
   };
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>Flota</div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>Vehículos</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>Vehículos</h1>
         </div>
         <button onClick={() => { setShowForm(true); setEditId(null); }} style={btnPrimary}>+ Agregar Vehículo</button>
       </div>

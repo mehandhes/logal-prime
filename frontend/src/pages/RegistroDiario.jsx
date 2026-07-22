@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api, { fmt, fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const TIPOS_INGRESO = ['Empresarial', 'Ejecutivo', 'Aeropuerto', 'Turismo', 'Otro'];
 
@@ -18,6 +19,7 @@ const emptyForm = () => ({
 
 export default function RegistroDiario() {
   const { vehicles, selectedVehicle } = useVehicles();
+  const isMobile = useIsMobile();
   const [registros, setRegistros] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -104,15 +106,22 @@ export default function RegistroDiario() {
 
   const totalPages = Math.ceil(total / 20);
 
+  const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' };
+  const grid3 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' };
+
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px', overflowX: 'auto' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Movimientos
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
             Registro Diario
           </h1>
         </div>
@@ -348,14 +357,12 @@ const tdStyle = {
   padding: '14px 16px', fontSize: '13px', color: '#D7DCE0'
 };
 const overlayStyle = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
-  zIndex: 1000, padding: '24px'
+  zIndex: 1000, padding: '16px'
 };
 const modalStyle = {
   background: '#151920', border: '1px solid rgba(197,198,199,0.15)',
-  borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '560px',
-  maxHeight: '90vh', overflowY: 'auto'
+  borderRadius: '16px', padding: '24px 20px',
+  width: '100%', maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto'
 };
-const grid2 = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' };
-const grid3 = { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' };

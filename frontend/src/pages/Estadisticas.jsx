@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import api, { fmt, fmtShort } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -22,6 +23,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function Estadisticas() {
   const { selectedVehicle } = useVehicles();
+  const isMobile = useIsMobile();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [meses, setMeses] = useState(6);
@@ -45,20 +47,24 @@ export default function Estadisticas() {
   ];
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px', overflowX: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Análisis
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
             Estadísticas y Proyecciones
           </h1>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           {[3, 6, 12].map(m => (
             <button key={m} onClick={() => setMeses(m)} style={{
-              padding: '8px 16px', borderRadius: '8px', fontSize: '13px',
+              padding: isMobile ? '7px 12px' : '8px 16px', borderRadius: '8px', fontSize: '13px',
               background: meses === m ? '#C5C6C7' : '#1F2833',
               color: meses === m ? '#0B0C10' : '#C5C6C7',
               border: '1px solid rgba(197,198,199,0.2)', cursor: 'pointer', fontWeight: 600

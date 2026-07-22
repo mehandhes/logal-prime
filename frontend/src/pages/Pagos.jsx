@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import api, { fmt, fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const ESTADO_COLORS = { pendiente: '#f59e0b', pagado: '#8FD9B0', parcial: '#C5C6C7' };
 
 export default function Pagos() {
   const { vehicles, selectedVehicle } = useVehicles();
+  const isMobile = useIsMobile();
   const [pagos, setPagos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showGen, setShowGen] = useState(false);
@@ -55,13 +57,17 @@ export default function Pagos() {
   };
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px', overflowX: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Liquidaciones
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
             Pagos y Liquidación
           </h1>
         </div>

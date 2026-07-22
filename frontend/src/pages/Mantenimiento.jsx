@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import api, { fmt, fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const TIPOS = ['Cambio aceite', 'Llantas', 'Frenos', 'Revisión técnica', 'Lavado', 'Reparación', 'Otro'];
 const ESTADO_COLORS = { programado: '#f59e0b', en_proceso: '#C5C6C7', completado: '#8FD9B0' };
 
 export default function Mantenimiento() {
   const { vehicles, selectedVehicle } = useVehicles();
+  const isMobile = useIsMobile();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -77,13 +79,17 @@ export default function Mantenimiento() {
   const pendientes = items.filter(i => i.estado !== 'completado');
 
   return (
-    <main style={{ flex: 1, minWidth: 0, padding: '36px 44px 60px', overflowX: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '32px' }}>
+    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '72px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
+      <div style={{
+        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
+      }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
             Flota
           </div>
-          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: '32px', color: '#FFFFFF' }}>
+          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
             Mantenimiento
           </h1>
         </div>

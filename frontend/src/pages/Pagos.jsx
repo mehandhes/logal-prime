@@ -13,10 +13,12 @@ export default function Pagos() {
   const [showGen, setShowGen] = useState(false);
   const [genForm, setGenForm] = useState({
     vehiculoId: '', fechaInicio: '', fechaFin: '',
-    tipo: 'semanal', porcentajeConductor: 30
+    tipo: 'quincenal', tipoLiquidacion: 'registros',
+    montoConductor: '', porcentajeConductor: 30
   });
   const [generating, setGenerating] = useState(false);
   const [showPago, setShowPago] = useState(null);
+  const [preview, setPreview] = useState(null);
 
   const fetchPagos = () => {
     setLoading(true);
@@ -28,12 +30,27 @@ export default function Pagos() {
     if (selectedVehicle) setGenForm(f => ({ ...f, vehiculoId: selectedVehicle._id }));
   }, [selectedVehicle]);
 
-  const handleGenerar = async (e) => {
+  // Paso 1 -> 2: previsualiza el resumen sin guardar.
+  const handlePrevisualizar = async (e) => {
     e.preventDefault();
+    setGenerating(true);
+    try {
+      const res = await api.post('/pagos/previsualizar', genForm);
+      setPreview(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || 'No se pudo calcular el resumen.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Paso 2: confirma y guarda la liquidación.
+  const handleConfirmar = async () => {
     setGenerating(true);
     try {
       await api.post('/pagos/generar', genForm);
       setShowGen(false);
+      setPreview(null);
       fetchPagos();
     } catch (err) {
       alert(err.response?.data?.message || 'Error al generar liquidación.');
@@ -41,6 +58,8 @@ export default function Pagos() {
       setGenerating(false);
     }
   };
+
+  const cerrarGen = () => { setShowGen(false); setPreview(null); };
 
   const handleMarcarPagado = async (id) => {
     await api.put(`/pagos/${id}`, {
@@ -71,7 +90,7 @@ export default function Pagos() {
             Pagos y Liquidación
           </h1>
         </div>
-        <button onClick={() => setShowGen(true)} style={btnPrimary}>
+        <button onClick={() => { setPreview(null); setShowGen(true); }} style={btnPrimary}>
           + Generar Liquidación
         </button>
       </div>
@@ -110,10 +129,14 @@ export default function Pagos() {
       {showGen && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
-            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#FFFFFF', marginBottom: '24px' }}>
-              Generar Liquidación
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#FFFFFF', marginBottom: '6px' }}>
+              Cierre de quincena {preview ? '· Paso 2: Resumen' : '· Paso 1: Período'}
             </h2>
-            <form onSubmit={handleGenerar} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ fontSize: '12px', color: '#7C8994', marginBottom: '20px' }}>
+              {preview ? 'Revisa el resultado antes de guardar la liquidación.' : 'Elige el vehículo, el período y cómo se paga al conductor.'}
+            </div>
+            {!preview ? (
+            <form onSubmit={handlePrevisualizar} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <Label>Vehículo</Label>
                 <select
@@ -141,7 +164,7 @@ export default function Pagos() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <Label>Tipo</Label>
+                  <Label>Periodicidad</Label>
                   <select value={genForm.tipo} onChange={e => setGenForm({ ...genForm, tipo: e.target.value })} style={inputStyle}>
                     <option value="semanal">Semanal</option>
                     <option value="quincenal">Quincenal</option>
@@ -149,22 +172,78 @@ export default function Pagos() {
                   </select>
                 </div>
                 <div>
-                  <Label>% Conductor</Label>
+                  <Label>Sueldo del conductor</Label>
+                  <select value={genForm.tipoLiquidacion}
+                    onChange={e => setGenForm({ ...genForm, tipoLiquidacion: e.target.value })} style={inputStyle}>
+                    <option value="registros">Según pagos registrados (col. S)</option>
+                    <option value="fijo">Monto fijo pactado</option>
+                    <option value="porcentaje">% de la utilidad</option>
+                  </select>
+                </div>
+              </div>
+              {genForm.tipoLiquidacion === 'fijo' && (
+                <div>
+                  <Label>Monto a pagar al conductor ($COP)</Label>
+                  <input type="number" min="0" step="1000" value={genForm.montoConductor}
+                    onChange={e => setGenForm({ ...genForm, montoConductor: e.target.value })}
+                    style={inputStyle} required />
+                </div>
+              )}
+              {genForm.tipoLiquidacion === 'porcentaje' && (
+                <div>
+                  <Label>% Conductor sobre la utilidad</Label>
                   <input type="number" min="0" max="100" value={genForm.porcentajeConductor}
                     onChange={e => setGenForm({ ...genForm, porcentajeConductor: parseInt(e.target.value) })}
                     style={inputStyle} />
                 </div>
-              </div>
+              )}
               <div style={{ padding: '12px 16px', background: '#0B0C10', borderRadius: '8px', fontSize: '12px', color: '#8B98A3' }}>
-                La liquidación se calcula automáticamente sumando todos los registros del período seleccionado.
+                {genForm.tipoLiquidacion === 'registros'
+                  ? 'El sueldo del conductor se toma de la suma de "Pago al conductor" anotado en los registros del período (como la columna S de la hoja).'
+                  : genForm.tipoLiquidacion === 'fijo'
+                    ? 'Se descontará el monto fijo indicado como sueldo del conductor.'
+                    : 'El sueldo del conductor será el porcentaje indicado sobre la utilidad del período.'}
               </div>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <button type="submit" disabled={generating} style={btnPrimary}>
-                  {generating ? 'Generando...' : 'Generar'}
+                  {generating ? 'Calculando...' : 'Ver resumen →'}
                 </button>
-                <button type="button" onClick={() => setShowGen(false)} style={btnSecondary}>Cancelar</button>
+                <button type="button" onClick={cerrarGen} style={btnSecondary}>Cancelar</button>
               </div>
             </form>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {[
+                  ['Registros del período', preview.numRegistros],
+                  ['Total ingresos', fmt(preview.totalIngresos)],
+                  ['Total egresos', fmt(preview.totalEgresos)],
+                  ['Km recorridos', `${(preview.totalKm || 0).toLocaleString('es-CO')} km`],
+                  ['Rendimiento', `${preview.rendimientoKmGalon || 0} km/gal`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#B7C0C8', padding: '6px 0', borderBottom: '1px solid rgba(197,198,199,0.07)' }}>
+                    <span>{k}</span><span style={{ color: '#FFFFFF' }}>{v}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', padding: '8px 0' }}>
+                  <span style={{ color: '#C5C6C7' }}>Utilidad operativa</span>
+                  <span style={{ color: '#C5C6C7', fontWeight: 600 }}>{fmt(preview.utilidadOperativa)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                  <span style={{ color: '#f59e0b' }}>− Sueldo del conductor</span>
+                  <span style={{ color: '#f59e0b', fontWeight: 600 }}>{fmt(preview.sueldoConductor)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 700, borderTop: '1px solid rgba(197,198,199,0.15)', paddingTop: '12px', marginTop: '4px' }}>
+                  <span style={{ color: '#FFFFFF' }}>Neto empresa</span>
+                  <span style={{ color: preview.netoEmpresa >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(preview.netoEmpresa)}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '18px' }}>
+                  <button onClick={handleConfirmar} disabled={generating} style={btnPrimary}>
+                    {generating ? 'Guardando...' : 'Confirmar y guardar'}
+                  </button>
+                  <button onClick={() => setPreview(null)} style={btnSecondary}>← Volver</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -186,7 +265,9 @@ export default function Pagos() {
                 ['Total ingresos', fmt(showPago.totalIngresos)],
                 ['Total egresos', fmt(showPago.totalEgresos)],
                 ['Utilidad neta', fmt(showPago.totalIngresos - showPago.totalEgresos)],
-                [`Liquidación conductor (${showPago.porcentajeConductor}%)`, fmt(showPago.liquidacionConductor)],
+                [showPago.tipoLiquidacion === 'porcentaje'
+                  ? `Sueldo conductor (${showPago.porcentajeConductor}%)`
+                  : 'Sueldo del conductor', fmt(showPago.liquidacionConductor)],
                 ['Utilidad empresa', fmt(showPago.utilidadEmpresa)],
                 ['Km recorridos', `${showPago.totalKm?.toLocaleString('es-CO')} km`],
                 ['Viajes realizados', showPago.totalViajes],

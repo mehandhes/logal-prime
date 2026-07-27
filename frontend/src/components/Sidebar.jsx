@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { path: '/estadisticas', label: 'Estadísticas' },
   { path: '/proyecciones', label: 'Proyecciones' },
   { path: '/mantenimiento', label: 'Mantenimiento' },
+  { path: '/clientes', label: 'Clientes' },
   { path: '/vehiculos', label: 'Vehículos' },
 ];
 

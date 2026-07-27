@@ -10,6 +10,7 @@ import Pagos from './pages/Pagos';
 import Estadisticas from './pages/Estadisticas';
 import Mantenimiento from './pages/Mantenimiento';
 import Vehiculos from './pages/Vehiculos';
+import Clientes from './pages/Clientes';
 import { useIsMobile } from './hooks/useIsMobile';
 
 const BOTTOM_NAV = [
@@ -154,6 +155,7 @@ function AppRoutes() {
       <Route path="/proyecciones" element={<ProtectedLayout><Estadisticas /></ProtectedLayout>} />
       <Route path="/mantenimiento" element={<ProtectedLayout><Mantenimiento /></ProtectedLayout>} />
       <Route path="/vehiculos" element={<ProtectedLayout><Vehiculos /></ProtectedLayout>} />
+      <Route path="/clientes" element={<ProtectedLayout><Clientes /></ProtectedLayout>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

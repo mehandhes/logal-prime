@@ -3,6 +3,22 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const Pago = require('../models/Pago');
 const RegistroDiario = require('../models/RegistroDiario');
+const { liquidarPeriodo } = require('../utils/contabilidad');
+
+// Trae los registros de un período y calcula la liquidación (sin guardar).
+async function calcularLiquidacion({ vehiculoId, fechaInicio, fechaFin, tipoLiquidacion, montoConductor, porcentajeConductor }) {
+  const registros = await RegistroDiario.find({
+    vehiculo: vehiculoId,
+    fecha: { $gte: new Date(fechaInicio), $lte: new Date(fechaFin + 'T23:59:59') }
+  }).sort({ fecha: 1 });
+
+  const liq = liquidarPeriodo(registros, {
+    modo: tipoLiquidacion || 'registros',
+    montoConductor,
+    porcentajeConductor
+  });
+  return { registros, liq };
+}
 
 // GET /api/pagos
 router.get('/', auth, async (req, res) => {
@@ -39,47 +55,58 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
-// POST /api/pagos/generar - genera liquidación automática desde registros
+// POST /api/pagos/previsualizar - calcula la liquidación SIN guardar (paso 2 del asistente)
+router.post('/previsualizar', auth, async (req, res) => {
+  try {
+    const { registros, liq } = await calcularLiquidacion(req.body);
+    if (registros.length === 0) return res.status(400).json({ message: 'No hay registros para este período.' });
+    res.json({
+      numRegistros: registros.length,
+      totalIngresos: liq.totalIngresos,
+      totalEgresos: liq.totalEgresos,
+      totalKm: liq.totalKm,
+      totalViajes: liq.totalViajes,
+      galones: liq.galones,
+      rendimientoKmGalon: Math.round(liq.rendimientoKmGalon * 100) / 100,
+      utilidadOperativa: liq.utilidadOperativa,
+      sueldoConductor: liq.sueldoConductor,
+      netoEmpresa: liq.netoEmpresa
+    });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+// POST /api/pagos/generar - genera y GUARDA la liquidación desde los registros
 router.post('/generar', auth, async (req, res) => {
   try {
-    const { vehiculoId, fechaInicio, fechaFin, tipo = 'semanal', porcentajeConductor = 30 } = req.body;
+    const {
+      vehiculoId, fechaInicio, fechaFin, tipo = 'quincenal',
+      // tipoLiquidacion: 'registros' (suma de pagoConductor de la hoja, col. S),
+      // 'fijo' (monto pactado) o 'porcentaje' (% de la utilidad).
+      tipoLiquidacion = 'registros',
+      porcentajeConductor = 30
+    } = req.body;
 
-    // Obtener registros del período
-    const registros = await RegistroDiario.find({
-      vehiculo: vehiculoId,
-      fecha: {
-        $gte: new Date(fechaInicio),
-        $lte: new Date(fechaFin + 'T23:59:59')
-      }
-    });
-
+    const { registros, liq } = await calcularLiquidacion(req.body);
     if (registros.length === 0) {
       return res.status(400).json({ message: 'No hay registros para este período.' });
     }
 
-    const totalIngresos = registros.reduce((s, r) => s + (r.ingresos?.valor || 0), 0);
-    const totalEgresos = registros.reduce((s, r) => s + (r.totalEgresos || 0), 0);
-    const totalKm = registros.reduce((s, r) => s + ((r.kmFin || 0) - (r.kmInicio || 0)), 0);
-    const totalViajes = registros.reduce((s, r) => s + (r.ingresos?.numViajes || 1), 0);
-    const utilidadNeta = totalIngresos - totalEgresos;
-    const liquidacionConductor = (utilidadNeta * porcentajeConductor) / 100;
-    const utilidadEmpresa = utilidadNeta - liquidacionConductor;
-
-    // Get vehicle info from first registro
     const primerRegistro = registros[0];
-
     const pago = new Pago({
       periodo: { tipo, fechaInicio: new Date(fechaInicio), fechaFin: new Date(fechaFin) },
       vehiculo: vehiculoId,
       placa: primerRegistro.placa,
       conductor: primerRegistro.conductor,
-      totalIngresos,
-      totalEgresos,
-      totalKm,
-      totalViajes,
+      totalIngresos: liq.totalIngresos,
+      totalEgresos: liq.totalEgresos,
+      totalKm: liq.totalKm,
+      totalViajes: liq.totalViajes,
+      tipoLiquidacion,
       porcentajeConductor,
-      liquidacionConductor,
-      utilidadEmpresa,
+      liquidacionConductor: liq.sueldoConductor,
+      utilidadEmpresa: liq.netoEmpresa,
       registros: registros.map(r => r._id)
     });
 

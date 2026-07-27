@@ -119,35 +119,67 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '22px' }}>
+      {/* KPI Cards — resultado en dos niveles */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '16px', marginBottom: '16px' }}>
         <KPICard
-          label="Ingresos semana"
+          label="Ingresos período"
           value={fmtShort(kpis.totalIngresos)}
           delta={`${kpis.totalViajes} viajes`}
           deltaPositive={null}
-          sub="período actual"
+          sub="total"
         />
         <KPICard
-          label="Egresos semana"
+          label="Egresos período"
           value={fmtShort(kpis.totalEgresos)}
           delta={`${kpis.totalKm} km`}
           sub="recorridos"
           deltaPositive={null}
         />
         <KPICard
-          label="Utilidad neta"
-          value={fmtShort(kpis.utilidadNeta)}
+          label="Utilidad operativa"
+          value={fmtShort(kpis.utilidadOperativa ?? kpis.utilidadNeta)}
           delta={`${kpis.margenPct}% margen`}
-          deltaPositive={kpis.utilidadNeta >= 0}
-          sub=""
+          deltaPositive={(kpis.utilidadOperativa ?? kpis.utilidadNeta) >= 0}
+          sub="ingresos − egresos"
+        />
+        <KPICard
+          label="Neto empresa"
+          value={fmtShort(kpis.netoEmpresa ?? (kpis.utilidadNeta - (kpis.pagosConductor || 0)))}
+          delta={`conductor: ${fmtShort(kpis.pagosConductor || 0)}`}
+          deltaPositive={(kpis.netoEmpresa ?? 0) >= 0}
+          sub="después de pagar conductor"
+        />
+      </div>
+
+      {/* KPIs de flota */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '16px', marginBottom: '22px' }}>
+        <KPICard
+          label="Rendimiento"
+          value={`${(kpis.rendimientoKmGalon || 0).toLocaleString('es-CO', { maximumFractionDigits: 1 })} km/gal`}
+          delta={`${(kpis.galonesTotal || 0).toLocaleString('es-CO', { maximumFractionDigits: 1 })} gal`}
+          sub="consumo"
+          deltaPositive={null}
+        />
+        <KPICard
+          label="Costo por km"
+          value={`$${(kpis.costoKm || 0).toLocaleString('es-CO')}`}
+          delta={`$${(kpis.ingresoKm || 0).toLocaleString('es-CO')}/km ingreso`}
+          sub="egreso real"
+          deltaPositive={null}
         />
         <KPICard
           label="Proyección semanal"
           value={fmtShort(kpis.proyeccionSemanal)}
-          delta={`$${kpis.ingresoKm.toLocaleString('es-CO')}/km`}
-          sub="ingreso"
+          delta="tendencia"
+          sub="ingreso estimado"
           deltaPositive={null}
+        />
+        <KPICard
+          label="Margen"
+          value={`${kpis.margenPct}%`}
+          delta={kpis.margenPct >= 0 ? 'positivo' : 'negativo'}
+          deltaPositive={kpis.margenPct >= 0}
+          sub="operativo"
         />
       </div>
 

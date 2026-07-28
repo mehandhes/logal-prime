@@ -40,5 +40,7 @@ export const fmtShort = (n) => {
 
 export const fmtDate = (d) => {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
+  // Las fechas se guardan como fecha-solo en UTC (medianoche). Se formatea en
+  // UTC para que NO se corra un día en zonas horarias negativas (ej. Colombia UTC-5).
+  return new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 };

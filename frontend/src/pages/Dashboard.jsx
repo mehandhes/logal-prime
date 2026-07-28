@@ -84,9 +84,11 @@ export default function Dashboard() {
   const maxBar = Math.max(...dailyData.map(d => Math.max(d.ingresos, d.egresos)), 1);
 
   const fechaLabel = (() => {
+    // Se formatea en UTC para no correr un día en zonas horarias negativas.
     const d = new Date(periodo.desde);
     const h = new Date(periodo.hasta);
-    return `${d.getDate()} – ${h.getDate()} ${h.toLocaleDateString('es-CO', { month: 'short', year: 'numeric' })}`;
+    const diaUTC = (x) => x.getUTCDate();
+    return `${diaUTC(d)} – ${diaUTC(h)} ${h.toLocaleDateString('es-CO', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
   })();
 
   const maxEgreso = Math.max(...egresoBreakdown.map(b => b.valor), 1);

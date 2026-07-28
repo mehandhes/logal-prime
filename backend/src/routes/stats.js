@@ -77,15 +77,16 @@ router.get('/dashboard', auth, async (req, res) => {
     const dailyData = [];
     const startDate = filter.fecha.$gte;
     for (let i = 0; i < 7; i++) {
+      // Aritmética en UTC para que el día no se corra en zonas horarias negativas.
       const day = new Date(startDate);
-      day.setDate(startDate.getDate() + i);
+      day.setUTCDate(startDate.getUTCDate() + i);
       const dayStr = day.toISOString().split('T')[0];
       const dayRegistros = registros.filter(r =>
         r.fecha.toISOString().split('T')[0] === dayStr
       );
       dailyData.push({
         fecha: dayStr,
-        dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][day.getDay()],
+        dia: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][day.getUTCDay()],
         ingresos: dayRegistros.reduce((s, r) => s + ingresoDe(r), 0),
         egresos: dayRegistros.reduce((s, r) => s + (r.totalEgresos || 0), 0),
         utilidad: dayRegistros.reduce((s, r) => s + (r.utilidadNeta || 0), 0)

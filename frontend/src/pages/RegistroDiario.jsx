@@ -8,7 +8,8 @@ const TIPOS_INGRESO = ['Empresarial', 'Ejecutivo', 'Aeropuerto', 'Turismo', 'Otr
 
 const emptyForm = () => ({
   fecha: new Date().toISOString().split('T')[0],
-  ingresos: { tipo: 'Empresarial', pasajes: '', descripcion: '', numViajes: 1 },
+  conductor: '',
+  ingresos: { tipo: 'Empresarial', efectivo: '', consignacion: '', descripcion: '', numViajes: 1 },
   ingresosPorCliente: [],   // [{ clienteId, nombre, valor }]
   combustible: '',
   galones: '',
@@ -95,6 +96,7 @@ export default function RegistroDiario() {
   const [clientes, setClientes] = useState([]);
   const [advertencias, setAdvertencias] = useState([]);
   const [showImport, setShowImport] = useState(false);
+  const [nuevoCliente, setNuevoCliente] = useState({ show: false, nombre: '', frecuenciaPago: 'mensual', saving: false });
 
   const fetchRegistros = () => {
     setLoading(true);
@@ -107,11 +109,30 @@ export default function RegistroDiario() {
   };
 
   useEffect(() => { fetchRegistros(); }, [selectedVehicle, page, filterVehicle]);
-  useEffect(() => {
-    api.get('/clientes', { params: { activo: true } })
-      .then(res => setClientes(res.data.clientes || []))
-      .catch(() => setClientes([]));
-  }, []);
+
+  const fetchClientes = () => api.get('/clientes', { params: { activo: true } })
+    .then(res => { setClientes(res.data.clientes || []); return res.data.clientes || []; })
+    .catch(() => { setClientes([]); return []; });
+  useEffect(() => { fetchClientes(); }, []);
+
+  // Crea un cliente nuevo desde el formulario y lo agrega como fila de ingreso.
+  const crearClienteRapido = async () => {
+    if (!nuevoCliente.nombre.trim()) return;
+    setNuevoCliente(nc => ({ ...nc, saving: true }));
+    try {
+      const res = await api.post('/clientes', {
+        nombre: nuevoCliente.nombre.trim(),
+        frecuenciaPago: nuevoCliente.frecuenciaPago,
+        tipo: 'fijo'
+      });
+      await fetchClientes();
+      setForm(f => ({ ...f, ingresosPorCliente: [...f.ingresosPorCliente, { clienteId: res.data._id, nombre: res.data.nombre, valor: '' }] }));
+      setNuevoCliente({ show: false, nombre: '', frecuenciaPago: 'mensual', saving: false });
+    } catch (err) {
+      alert(err.response?.data?.message || 'No se pudo crear el cliente.');
+      setNuevoCliente(nc => ({ ...nc, saving: false }));
+    }
+  };
 
   // Precarga el km inicio con el km fin del último registro del vehículo.
   const precargarOdometro = (vehiculoId) => {
@@ -126,7 +147,7 @@ export default function RegistroDiario() {
   const openNuevo = () => {
     const vId = selectedVehicle?._id;
     setEditId(null);
-    setForm({ ...emptyForm(), vehiculoId: vId });
+    setForm({ ...emptyForm(), vehiculoId: vId, conductor: selectedVehicle?.conductor || '' });
     setAdvertencias([]);
     setShowForm(true);
     precargarOdometro(vId);
@@ -159,12 +180,13 @@ export default function RegistroDiario() {
       const payload = {
         vehiculo: vehiculoId,
         placa: vehiculo?.placa || '',
-        conductor: vehiculo?.conductor || '',
+        conductor: form.conductor || vehiculo?.conductor || '',
         fecha: form.fecha,
         ingresos: {
           tipo: form.ingresos.tipo,
           descripcion: form.ingresos.descripcion,
-          pasajes: n(form.ingresos.pasajes),
+          efectivo: n(form.ingresos.efectivo),
+          consignacion: n(form.ingresos.consignacion),
           numViajes: parseInt(form.ingresos.numViajes) || 1
         },
         ingresosPorCliente,
@@ -213,11 +235,14 @@ export default function RegistroDiario() {
     setForm({
       fecha: r.fecha?.split('T')[0] || '',
       vehiculoId: r.vehiculo?._id || r.vehiculo,
+      conductor: r.conductor || '',
       ingresos: {
         tipo: r.ingresos?.tipo || 'Empresarial',
         descripcion: r.ingresos?.descripcion || '',
         numViajes: r.ingresos?.numViajes || 1,
-        pasajes: (r.ingresos?.pasajes ?? r.ingresos?.valor)?.toString() || ''
+        // Compat: registros viejos guardaban en pasajes/valor -> se muestra en efectivo.
+        efectivo: (r.ingresos?.efectivo ?? r.ingresos?.pasajes ?? r.ingresos?.valor)?.toString() || '',
+        consignacion: r.ingresos?.consignacion?.toString() || ''
       },
       ingresosPorCliente: (r.ingresosPorCliente || []).map(i => ({
         clienteId: i.cliente?._id || i.cliente || '', nombre: i.nombre || '', valor: i.valor?.toString() || ''
@@ -266,8 +291,9 @@ export default function RegistroDiario() {
   const grid2 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' };
   const grid3 = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' };
 
-  const totalIngresosForm = n(form.ingresos.pasajes) + form.ingresosPorCliente.reduce((s, c) => s + n(c.valor), 0);
+  const totalIngresosForm = n(form.ingresos.efectivo) + n(form.ingresos.consignacion) + form.ingresosPorCliente.reduce((s, c) => s + n(c.valor), 0);
   const totalEgresosForm = n(form.combustible) + n(form.peajes) + n(form.lavadas) + n(form.indrive) + n(form.otros);
+  const kmDiaForm = Math.max(0, (parseInt(form.kmFin) || 0) - (parseInt(form.kmInicio) || 0));
 
   return (
     <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '84px 16px 90px' : '36px 44px 60px', overflowX: 'hidden' }}>
@@ -321,7 +347,11 @@ export default function RegistroDiario() {
                   <Label>Vehículo</Label>
                   <select
                     value={form.vehiculoId || selectedVehicle?._id || ''}
-                    onChange={e => { setForm({ ...form, vehiculoId: e.target.value }); precargarOdometro(e.target.value); }}
+                    onChange={e => {
+                      const v = vehicles.find(x => x._id === e.target.value);
+                      setForm({ ...form, vehiculoId: e.target.value, conductor: v?.conductor || form.conductor });
+                      precargarOdometro(e.target.value);
+                    }}
                     style={inputStyle}
                   >
                     {vehicles.map(v => (
@@ -329,10 +359,24 @@ export default function RegistroDiario() {
                     ))}
                   </select>
                 </div>
+                <div style={{ gridColumn: isMobile ? 'auto' : '1/-1' }}>
+                  <Label>Conductor</Label>
+                  <Input value={form.conductor} onChange={e => setForm({ ...form, conductor: e.target.value })} placeholder="Nombre del conductor" />
+                </div>
               </div>
 
               <SectionTitle>Ingresos</SectionTitle>
               <div style={grid2}>
+                <div>
+                  <Label>Efectivo</Label>
+                  <Input type="number" min="0" step="100" value={form.ingresos.efectivo}
+                    onChange={e => setForm({ ...form, ingresos: { ...form.ingresos, efectivo: e.target.value } })} />
+                </div>
+                <div>
+                  <Label>Consignación</Label>
+                  <Input type="number" min="0" step="100" value={form.ingresos.consignacion}
+                    onChange={e => setForm({ ...form, ingresos: { ...form.ingresos, consignacion: e.target.value } })} />
+                </div>
                 <div>
                   <Label>Tipo de servicio</Label>
                   <select
@@ -348,38 +392,64 @@ export default function RegistroDiario() {
                   <Input type="number" min="1" value={form.ingresos.numViajes}
                     onChange={e => setForm({ ...form, ingresos: { ...form.ingresos, numViajes: e.target.value } })} />
                 </div>
-                <div style={{ gridColumn: isMobile ? 'auto' : '1/-1' }}>
-                  <Label>Pasajes / carreras del día</Label>
-                  <Input type="number" min="0" step="100" value={form.ingresos.pasajes}
-                    onChange={e => setForm({ ...form, ingresos: { ...form.ingresos, pasajes: e.target.value } })} />
-                </div>
               </div>
 
               {/* Ingresos por cliente (dinámico) */}
               <div style={{ marginTop: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <Label>Ingresos por cliente</Label>
-                  <button type="button" onClick={addCliente} style={{ ...btnSecondary, padding: '4px 12px', fontSize: '12px' }}>+ Cliente</button>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button type="button" onClick={addCliente} style={{ ...btnSecondary, padding: '4px 12px', fontSize: '12px' }}>+ Cliente</button>
+                    <button type="button" onClick={() => setNuevoCliente(nc => ({ ...nc, show: !nc.show }))} style={{ ...btnSecondary, padding: '4px 12px', fontSize: '12px' }}>+ Nuevo cliente</button>
+                  </div>
                 </div>
-                {form.ingresosPorCliente.length === 0 && (
-                  <div style={{ fontSize: '12px', color: '#5B6672', marginBottom: '4px' }}>
-                    {clientes.length === 0
-                      ? 'No hay clientes creados. Créalos en la sección Clientes para desglosar ingresos.'
-                      : 'Agrega los ingresos de clientes fijos (ej. Familia Rojas, Sofi).'}
+
+                {/* Crear cliente nuevo al vuelo */}
+                {nuevoCliente.show && (
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', padding: '10px', background: '#0B0C10', borderRadius: '8px', flexWrap: 'wrap' }}>
+                    <input placeholder="Nombre del cliente" value={nuevoCliente.nombre}
+                      onChange={e => setNuevoCliente(nc => ({ ...nc, nombre: e.target.value }))}
+                      style={{ ...inputStyle, flex: 2, minWidth: '140px' }} />
+                    <select value={nuevoCliente.frecuenciaPago}
+                      onChange={e => setNuevoCliente(nc => ({ ...nc, frecuenciaPago: e.target.value }))}
+                      style={{ ...inputStyle, flex: 1, minWidth: '120px' }}>
+                      {['diario', 'semanal', 'quincenal', 'mensual'].map(f => <option key={f} value={f} style={{ background: '#161920' }}>{f}</option>)}
+                    </select>
+                    <button type="button" onClick={crearClienteRapido} disabled={nuevoCliente.saving} style={{ ...btnPrimary, padding: '8px 14px', fontSize: '12px' }}>
+                      {nuevoCliente.saving ? '...' : 'Crear'}
+                    </button>
                   </div>
                 )}
-                {form.ingresosPorCliente.map((c, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                    <select value={c.clienteId} onChange={e => updateCliente(i, { clienteId: e.target.value })}
-                      style={{ ...inputStyle, flex: 2 }}>
-                      <option value="" style={{ background: '#161920' }}>Selecciona cliente…</option>
-                      {clientes.map(cl => <option key={cl._id} value={cl._id} style={{ background: '#161920' }}>{cl.nombre}</option>)}
-                    </select>
-                    <input type="number" min="0" step="100" placeholder="Valor" value={c.valor}
-                      onChange={e => updateCliente(i, { valor: e.target.value })} style={{ ...inputStyle, flex: 1 }} />
-                    <button type="button" onClick={() => removeCliente(i)} style={{ ...iconBtn, color: '#f87171' }}>✕</button>
+
+                {form.ingresosPorCliente.length === 0 && !nuevoCliente.show && (
+                  <div style={{ fontSize: '12px', color: '#5B6672', marginBottom: '4px' }}>
+                    {clientes.length === 0
+                      ? 'No hay clientes aún. Usa "+ Nuevo cliente" para crear el primero (ej. Familia Rojas, Sofi).'
+                      : 'Agrega los ingresos de clientes fijos, o crea uno nuevo.'}
                   </div>
-                ))}
+                )}
+                {form.ingresosPorCliente.map((c, i) => {
+                  const cli = clientes.find(x => x._id === c.clienteId);
+                  return (
+                    <div key={i} style={{ marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <select value={c.clienteId} onChange={e => updateCliente(i, { clienteId: e.target.value })}
+                          style={{ ...inputStyle, flex: 2 }}>
+                          <option value="" style={{ background: '#161920' }}>Selecciona cliente…</option>
+                          {clientes.map(cl => <option key={cl._id} value={cl._id} style={{ background: '#161920' }}>{cl.nombre}</option>)}
+                        </select>
+                        <input type="number" min="0" step="100" placeholder="Valor" value={c.valor}
+                          onChange={e => updateCliente(i, { valor: e.target.value })} style={{ ...inputStyle, flex: 1 }} />
+                        <button type="button" onClick={() => removeCliente(i)} style={{ ...iconBtn, color: '#f87171' }}>✕</button>
+                      </div>
+                      {cli && (
+                        <div style={{ fontSize: '11px', color: '#5B6672', marginTop: '3px', marginLeft: '2px' }}>
+                          Frecuencia de pago: {cli.frecuenciaPago || 'mensual'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <SectionTitle>Egresos</SectionTitle>
@@ -406,6 +476,10 @@ export default function RegistroDiario() {
                   <Input type="number" min="0" value={form.kmFin} onChange={e => setForm({ ...form, kmFin: e.target.value })} /></div>
                 <div><Label>Pago al conductor</Label>
                   <Input type="number" min="0" step="100" value={form.pagoConductor} onChange={e => setForm({ ...form, pagoConductor: e.target.value })} /></div>
+              </div>
+              <div style={{ marginTop: '10px', padding: '8px 14px', background: '#0B0C10', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#8B98A3' }}>Total Km del día:</span>
+                <span style={{ color: '#C5C6C7', fontWeight: 600 }}>{kmDiaForm.toLocaleString('es-CO')} km</span>
               </div>
 
               <div style={{ marginTop: '16px' }}>

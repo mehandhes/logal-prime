@@ -16,6 +16,12 @@ const clienteSchema = new mongoose.Schema({
     enum: ['fijo', 'ocasional', 'empresa'],
     default: 'fijo'
   },
+  // Con qué periodicidad paga el cliente (propiedad fija del cliente).
+  frecuenciaPago: {
+    type: String,
+    enum: ['diario', 'semanal', 'quincenal', 'mensual'],
+    default: 'mensual'
+  },
   contacto: {
     telefono: String,
     email: String

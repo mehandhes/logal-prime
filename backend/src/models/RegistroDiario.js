@@ -52,7 +52,10 @@ const registroDiarioSchema = new mongoose.Schema({
       enum: ['Empresarial', 'Ejecutivo', 'Aeropuerto', 'Turismo', 'Otro'],
       default: 'Empresarial'
     },
-    // G — Ingresos por pasajes / carreras del día
+    // Ingreso general del día por método de pago.
+    efectivo: { type: Number, default: 0, min: 0 },
+    consignacion: { type: Number, default: 0, min: 0 },
+    // G — Base general (espejo = efectivo + consignación; compat con 'pasajes').
     pasajes: {
       type: Number,
       default: 0,

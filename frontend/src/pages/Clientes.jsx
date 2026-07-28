@@ -3,7 +3,8 @@ import api, { fmt, fmtDate } from '../utils/api';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 const TIPOS = ['fijo', 'ocasional', 'empresa'];
-const emptyForm = () => ({ nombre: '', tipo: 'fijo', contacto: { telefono: '', email: '' }, tarifaDia: '', notas: '' });
+const FRECUENCIAS = ['diario', 'semanal', 'quincenal', 'mensual'];
+const emptyForm = () => ({ nombre: '', tipo: 'fijo', frecuenciaPago: 'mensual', contacto: { telefono: '', email: '' }, tarifaDia: '', notas: '' });
 
 export default function Clientes() {
   const isMobile = useIsMobile();
@@ -31,7 +32,7 @@ export default function Clientes() {
   };
 
   const edit = (c) => {
-    setForm({ nombre: c.nombre, tipo: c.tipo, contacto: c.contacto || { telefono: '', email: '' }, tarifaDia: c.tarifaDia?.toString() || '', notas: c.notas || '' });
+    setForm({ nombre: c.nombre, tipo: c.tipo, frecuenciaPago: c.frecuenciaPago || 'mensual', contacto: c.contacto || { telefono: '', email: '' }, tarifaDia: c.tarifaDia?.toString() || '', notas: c.notas || '' });
     setEditId(c._id); setShowForm(true);
   };
 
@@ -57,10 +58,14 @@ export default function Clientes() {
           <form onSubmit={submit}>
             <Label>Nombre</Label>
             <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} required style={{ ...inputStyle, marginBottom: '12px' }} />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
               <div><Label>Tipo</Label>
                 <select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} style={inputStyle}>
                   {TIPOS.map(t => <option key={t} value={t} style={{ background: '#161920' }}>{t}</option>)}
+                </select></div>
+              <div><Label>Frecuencia de pago</Label>
+                <select value={form.frecuenciaPago} onChange={e => setForm({ ...form, frecuenciaPago: e.target.value })} style={inputStyle}>
+                  {FRECUENCIAS.map(f => <option key={f} value={f} style={{ background: '#161920' }}>{f}</option>)}
                 </select></div>
               <div><Label>Tarifa día (opcional)</Label>
                 <input type="number" value={form.tarifaDia} onChange={e => setForm({ ...form, tarifaDia: e.target.value })} style={inputStyle} /></div>
@@ -89,15 +94,16 @@ export default function Clientes() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
             <thead><tr style={{ borderBottom: '1px solid rgba(197,198,199,0.1)' }}>
-              {['Cliente', 'Tipo', 'Contacto', 'Saldo anticipos', 'Estado', ''].map(h => <th key={h} style={thStyle}>{h}</th>)}
+              {['Cliente', 'Tipo', 'Frecuencia', 'Contacto', 'Saldo anticipos', 'Estado', ''].map(h => <th key={h} style={thStyle}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {loading ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
-                : clientes.length === 0 ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Sin clientes. Crea el primero (ej. Familia Rojas, Sofi).</td></tr>
+              {loading ? <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
+                : clientes.length === 0 ? <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Sin clientes. Crea el primero (ej. Familia Rojas, Sofi).</td></tr>
                 : clientes.map(c => (
                   <tr key={c._id} style={{ borderBottom: '1px solid rgba(197,198,199,0.06)', opacity: c.activo ? 1 : 0.5 }}>
                     <td style={{ ...tdStyle, fontWeight: 600, color: '#FFFFFF', cursor: 'pointer' }} onClick={() => setDetalle(c._id)}>{c.nombre}</td>
                     <td style={tdStyle}><span style={{ padding: '3px 8px', borderRadius: '4px', background: 'rgba(197,198,199,0.1)', fontSize: '11px', color: '#C5C6C7' }}>{c.tipo}</span></td>
+                    <td style={{ ...tdStyle, color: '#93A0AB' }}>{c.frecuenciaPago || 'mensual'}</td>
                     <td style={{ ...tdStyle, color: '#93A0AB' }}>{c.contacto?.telefono || '—'}</td>
                     <td style={{ ...tdStyle, color: c.saldoAnticipos > 0 ? '#8FD9B0' : '#93A0AB', fontWeight: 600 }}>{fmt(c.saldoAnticipos)}</td>
                     <td style={tdStyle}>{c.activo ? 'Activo' : 'Inactivo'}</td>

@@ -52,6 +52,15 @@ test('Compatibilidad: registro antiguo con ingresos.valor', () => {
   assert.strictEqual(t.totalIngresos, 225000);
 });
 
+test('Total = Efectivo + Consignación + clientes', () => {
+  const r = {
+    ingresos: { efectivo: 150000, consignacion: 50000 },
+    ingresosPorCliente: [{ nombre: 'Familia Rojas', valor: 16000 }]
+  };
+  const t = calcularTotales(r);
+  assert.strictEqual(t.totalIngresos, 216000);
+});
+
 console.log('contabilidad.liquidarPeriodo');
 
 test('Utilidad operativa vs neto empresa (modo registros)', () => {

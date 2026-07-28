@@ -39,12 +39,19 @@ function sumarIngresosPorCliente(reg) {
  */
 function calcularTotales(reg) {
   const ing = reg.ingresos || {};
-  // Compat: si un registro antiguo trae 'valor' y no 'pasajes',
-  // se interpreta 'valor' como los pasajes del día.
-  const pasajes = num(ing.pasajes != null ? ing.pasajes : ing.valor);
+  const efectivo = num(ing.efectivo);
+  const consignacion = num(ing.consignacion);
+  // Ingreso general del día por método de pago (efectivo + consignación).
+  // Compat: si un registro antiguo no tiene efectivo/consignación pero sí
+  // 'pasajes'/'valor', se usa ese monto como base (efectivo).
+  const base = (efectivo || consignacion)
+    ? (efectivo + consignacion)
+    : num(ing.pasajes != null ? ing.pasajes : ing.valor);
+  const pasajes = base; // se mantiene el nombre 'pasajes' como base general
   const ingresosClientes = sumarIngresosPorCliente(reg);
 
-  const totalIngresos = pasajes + ingresosClientes;
+  // Total del día = Efectivo + Consignación + Σ ingresos por cliente.
+  const totalIngresos = base + ingresosClientes;
 
   const totalEgresos =
     num(reg.combustible) +

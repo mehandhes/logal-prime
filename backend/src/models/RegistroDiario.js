@@ -121,7 +121,23 @@ const registroDiarioSchema = new mongoose.Schema({
   totalEgresos: { type: Number, default: 0 },   // R
   utilidadNeta: { type: Number, default: 0 },   // T (Saldo Final)
 
-  observaciones: String
+  observaciones: String,
+
+  // ── Trazabilidad ────────────────────────────────────────────
+  // Quién capturó el registro. Lo asigna el backend a partir del token;
+  // nunca se acepta desde el cuerpo de la petición. Es la base del
+  // "historial propio" del conductor y de la auditoría del admin.
+  creadoPor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  // Último usuario que modificó el registro.
+  modificadoPor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  }
 }, { timestamps: true });
 
 // La lógica de cálculo vive en utils/contabilidad.js (única fuente de verdad).
@@ -134,5 +150,7 @@ registroDiarioSchema.pre('save', function(next) {
 
 // Índice para acelerar el dashboard, filtros y reportes por vehículo y fecha.
 registroDiarioSchema.index({ vehiculo: 1, fecha: -1 });
+// Índice para el historial propio del conductor.
+registroDiarioSchema.index({ creadoPor: 1, fecha: -1 });
 
 module.exports = mongoose.model('RegistroDiario', registroDiarioSchema);

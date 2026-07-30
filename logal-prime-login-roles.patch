@@ -1,0 +1,2585 @@
+From b3e38bd3b6e458b460a2872724dbe2f4fc5b366c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 30 Jul 2026 16:35:50 +0000
+Subject: [PATCH] Login por roles: Admin con acceso total y Conductor limitado
+ a reportar
+
+---
+ backend/package.json                  |   3 +-
+ backend/src/index.js                  |   1 +
+ backend/src/middleware/auth.js        |  79 ++++++-
+ backend/src/models/RegistroDiario.js  |  20 +-
+ backend/src/models/User.js            |  77 +++++-
+ backend/src/routes/anticipos.js       |   8 +-
+ backend/src/routes/auth.js            |  87 +++++--
+ backend/src/routes/clientes.js        |   8 +-
+ backend/src/routes/mantenimiento.js   |   8 +-
+ backend/src/routes/pagos.js           |  14 +-
+ backend/src/routes/registros.js       | 107 +++++++--
+ backend/src/routes/stats.js           |   4 +-
+ backend/src/routes/usuarios.js        | 193 +++++++++++++++
+ backend/src/routes/vehicles.js        |   6 +-
+ backend/src/utils/passwords.js        |  59 +++++
+ backend/src/utils/permisos.js         | 130 +++++++++++
+ backend/test/auth-http.test.js        | 172 ++++++++++++++
+ backend/test/permisos.test.js         | 254 ++++++++++++++++++++
+ frontend/src/App.jsx                  |  60 ++++-
+ frontend/src/components/Sidebar.jsx   |  35 ++-
+ frontend/src/context/AuthContext.jsx  |  27 ++-
+ frontend/src/pages/MiCuenta.jsx       | 127 ++++++++++
+ frontend/src/pages/RegistroDiario.jsx |  78 +++++--
+ frontend/src/pages/Usuarios.jsx       | 325 ++++++++++++++++++++++++++
+ 24 files changed, 1757 insertions(+), 125 deletions(-)
+ create mode 100644 backend/src/routes/usuarios.js
+ create mode 100644 backend/src/utils/passwords.js
+ create mode 100644 backend/src/utils/permisos.js
+ create mode 100644 backend/test/auth-http.test.js
+ create mode 100644 backend/test/permisos.test.js
+ create mode 100644 frontend/src/pages/MiCuenta.jsx
+ create mode 100644 frontend/src/pages/Usuarios.jsx
+
+diff --git a/backend/package.json b/backend/package.json
+index 2cecce5..c4a672f 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -5,7 +5,8 @@
+   "main": "src/index.js",
+   "scripts": {
+     "start": "node src/index.js",
+-    "dev": "nodemon src/index.js"
++    "dev": "nodemon src/index.js",
++    "test": "node test/contabilidad.test.js && node test/permisos.test.js && node test/auth-http.test.js"
+   },
+   "dependencies": {
+     "bcryptjs": "^2.4.3",
+diff --git a/backend/src/index.js b/backend/src/index.js
+index 1255fa8..e22f73e 100644
+--- a/backend/src/index.js
++++ b/backend/src/index.js
+@@ -43,6 +43,7 @@ app.use(async (req, res, next) => {
+ 
+ // Routes (DESPUÉS del middleware DB)
+ app.use('/api/auth', require('./routes/auth'));
++app.use('/api/usuarios', require('./routes/usuarios'));
+ app.use('/api/vehicles', require('./routes/vehicles'));
+ app.use('/api/clientes', require('./routes/clientes'));
+ app.use('/api/anticipos', require('./routes/anticipos'));
+diff --git a/backend/src/middleware/auth.js b/backend/src/middleware/auth.js
+index b035b6e..2f98107 100644
+--- a/backend/src/middleware/auth.js
++++ b/backend/src/middleware/auth.js
+@@ -1,17 +1,86 @@
+ const jwt = require('jsonwebtoken');
++const User = require('../models/User');
+ 
+-module.exports = (req, res, next) => {
++const JWT_SECRET = process.env.JWT_SECRET || 'logal_prime_secret_2024';
++
++/**
++ * Middleware de autenticación.
++ *
++ * Verifica el JWT y — a diferencia de la versión anterior — vuelve a cargar
++ * el usuario desde la base de datos en cada petición. Esto es intencional:
++ *
++ *   1. El rol viaja en el token, pero el token dura 7 días. Si el admin
++ *      cambia el rol de alguien o lo desactiva, el cambio debe aplicar de
++ *      inmediato, no cuando expire su sesión.
++ *   2. Los tokens emitidos antes de esta actualización no traen `rol`.
++ *      Leyéndolo de la BD siguen funcionando sin obligar a nadie a
++ *      volver a iniciar sesión.
++ *
++ * Deja en `req.user` un objeto plano y en `req.usuarioDoc` el documento
++ * completo de Mongoose por si la ruta lo necesita.
++ */
++async function auth(req, res, next) {
+   const token = req.header('Authorization')?.replace('Bearer ', '');
+ 
+   if (!token) {
+     return res.status(401).json({ message: 'Acceso denegado. Token requerido.' });
+   }
+ 
++  let decoded;
++  try {
++    decoded = jwt.verify(token, JWT_SECRET);
++  } catch (err) {
++    return res.status(401).json({ message: 'Token inválido o expirado.' });
++  }
++
+   try {
+-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'logal_prime_secret_2024');
+-    req.user = decoded;
++    const usuario = await User.findById(decoded.id).select('-password');
++
++    if (!usuario) {
++      return res.status(401).json({ message: 'La cuenta ya no existe.' });
++    }
++    if (usuario.activo === false) {
++      return res.status(403).json({ message: 'Cuenta desactivada. Contacta al administrador.' });
++    }
++
++    req.usuarioDoc = usuario;
++    req.user = {
++      id: String(usuario._id),
++      username: usuario.username,
++      nombre: usuario.nombre,
++      rol: usuario.rol,
++      activo: usuario.activo
++    };
+     next();
+   } catch (err) {
+-    res.status(401).json({ message: 'Token inválido o expirado.' });
++    console.error('Error verificando usuario:', err.message);
++    res.status(500).json({ message: 'Error del servidor al verificar la sesión.' });
+   }
+-};
++}
++
++/**
++ * Exige que el usuario autenticado tenga alguno de los roles indicados.
++ * Se usa siempre encadenado después de `auth`.
++ */
++function exigirRol(...roles) {
++  return (req, res, next) => {
++    if (!req.user) {
++      return res.status(401).json({ message: 'Acceso denegado. Token requerido.' });
++    }
++    if (!roles.includes(req.user.rol)) {
++      return res.status(403).json({
++        message: 'No tienes permisos para realizar esta acción.',
++        rolRequerido: roles.join(' o '),
++        tuRol: req.user.rol
++      });
++    }
++    next();
++  };
++}
++
++// Atajos listos para usar en las rutas: router.get('/', auth.soloAdmin, ...)
++auth.exigirRol = exigirRol;
++auth.soloAdmin = [auth, exigirRol('admin')];
++auth.requiereRol = (...roles) => [auth, exigirRol(...roles)];
++
++module.exports = auth;
+diff --git a/backend/src/models/RegistroDiario.js b/backend/src/models/RegistroDiario.js
+index 7122657..9a4b1e4 100644
+--- a/backend/src/models/RegistroDiario.js
++++ b/backend/src/models/RegistroDiario.js
+@@ -121,7 +121,23 @@ const registroDiarioSchema = new mongoose.Schema({
+   totalEgresos: { type: Number, default: 0 },   // R
+   utilidadNeta: { type: Number, default: 0 },   // T (Saldo Final)
+ 
+-  observaciones: String
++  observaciones: String,
++
++  // ── Trazabilidad ────────────────────────────────────────────
++  // Quién capturó el registro. Lo asigna el backend a partir del token;
++  // nunca se acepta desde el cuerpo de la petición. Es la base del
++  // "historial propio" del conductor y de la auditoría del admin.
++  creadoPor: {
++    type: mongoose.Schema.Types.ObjectId,
++    ref: 'User',
++    default: null
++  },
++  // Último usuario que modificó el registro.
++  modificadoPor: {
++    type: mongoose.Schema.Types.ObjectId,
++    ref: 'User',
++    default: null
++  }
+ }, { timestamps: true });
+ 
+ // La lógica de cálculo vive en utils/contabilidad.js (única fuente de verdad).
+@@ -134,5 +150,7 @@ registroDiarioSchema.pre('save', function(next) {
+ 
+ // Índice para acelerar el dashboard, filtros y reportes por vehículo y fecha.
+ registroDiarioSchema.index({ vehiculo: 1, fecha: -1 });
++// Índice para el historial propio del conductor.
++registroDiarioSchema.index({ creadoPor: 1, fecha: -1 });
+ 
+ module.exports = mongoose.model('RegistroDiario', registroDiarioSchema);
+diff --git a/backend/src/models/User.js b/backend/src/models/User.js
+index 6dc18d4..6cb17a1 100644
+--- a/backend/src/models/User.js
++++ b/backend/src/models/User.js
+@@ -1,12 +1,28 @@
+ const mongoose = require('mongoose');
+ const bcrypt = require('bcryptjs');
+ 
++/**
++ * Roles del sistema
++ *
++ *   admin     — Acceso total: dashboard, estadísticas, pagos y liquidación,
++ *               mantenimiento, clientes, anticipos, vehículos y gestión de
++ *               usuarios. Puede editar y borrar cualquier registro.
++ *
++ *   conductor — Acceso restringido a la operación diaria: solo puede crear
++ *               registros de ingresos y egresos, ver los registros que él
++ *               mismo capturó y corregirlos el mismo día. No ve utilidades
++ *               consolidadas, liquidaciones ni ningún otro módulo.
++ */
++const ROLES = ['admin', 'conductor'];
++
+ const userSchema = new mongoose.Schema({
+   username: {
+     type: String,
+     required: true,
+     unique: true,
+-    trim: true
++    trim: true,
++    lowercase: true,
++    minlength: [3, 'El usuario debe tener al menos 3 caracteres.']
+   },
+   password: {
+     type: String,
+@@ -14,24 +30,71 @@ const userSchema = new mongoose.Schema({
+   },
+   nombre: {
+     type: String,
+-    required: true
++    required: true,
++    trim: true
++  },
++  // Rol del usuario. El default es 'admin' a propósito: el documento creado
++  // antes de esta migración (el administrador original) no tiene el campo, y
++  // Mongoose aplica el default al hidratarlo, conservando su acceso. Las
++  // rutas de creación SIEMPRE exigen el rol de forma explícita.
++  rol: {
++    type: String,
++    enum: {
++      values: ROLES,
++      message: 'Rol inválido. Debe ser "admin" o "conductor".'
++    },
++    default: 'admin'
++  },
++  activo: {
++    type: Boolean,
++    default: true
+   },
+   empresa: {
+     type: String,
+     default: 'LOGAL Prime'
++  },
++  ultimoAcceso: {
++    type: Date,
++    default: null
++  },
++  creadoPor: {
++    type: mongoose.Schema.Types.ObjectId,
++    ref: 'User',
++    default: null
+   }
+ }, { timestamps: true });
+ 
+-// Hash password before saving
+-userSchema.pre('save', async function(next) {
++// Hash de la contraseña antes de guardar (solo si cambió).
++userSchema.pre('save', async function (next) {
+   if (!this.isModified('password')) return next();
+   this.password = await bcrypt.hash(this.password, 12);
+   next();
+ });
+ 
+-// Compare password method
+-userSchema.methods.comparePassword = async function(candidatePassword) {
++userSchema.methods.comparePassword = async function (candidatePassword) {
+   return bcrypt.compare(candidatePassword, this.password);
+ };
+ 
+-module.exports = mongoose.model('User', userSchema);
++userSchema.methods.esAdmin = function () {
++  return this.rol === 'admin';
++};
++
++// Vista segura del usuario: nunca expone el hash de la contraseña.
++userSchema.methods.toPublic = function () {
++  return {
++    id: this._id,
++    _id: this._id,
++    username: this.username,
++    nombre: this.nombre,
++    rol: this.rol,
++    activo: this.activo,
++    empresa: this.empresa,
++    ultimoAcceso: this.ultimoAcceso,
++    createdAt: this.createdAt
++  };
++};
++
++const User = mongoose.model('User', userSchema);
++User.ROLES = ROLES;
++
++module.exports = User;
+diff --git a/backend/src/routes/anticipos.js b/backend/src/routes/anticipos.js
+index 8a4489d..c8f2075 100644
+--- a/backend/src/routes/anticipos.js
++++ b/backend/src/routes/anticipos.js
+@@ -13,7 +13,7 @@ async function refrescarSaldoCliente(clienteId) {
+ }
+ 
+ // GET /api/anticipos?cliente=
+-router.get('/', auth, async (req, res) => {
++router.get('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const filter = {};
+     if (req.query.cliente) filter.cliente = req.query.cliente;
+@@ -25,7 +25,7 @@ router.get('/', auth, async (req, res) => {
+ });
+ 
+ // POST /api/anticipos — registra un adelanto (pasivo, NO ingreso del día)
+-router.post('/', auth, async (req, res) => {
++router.post('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const cliente = await Cliente.findById(req.body.cliente);
+     if (!cliente) return res.status(400).json({ message: 'Cliente inválido.' });
+@@ -43,7 +43,7 @@ router.post('/', auth, async (req, res) => {
+ });
+ 
+ // POST /api/anticipos/:id/aplicar — consume parte del anticipo contra un servicio
+-router.post('/:id/aplicar', auth, async (req, res) => {
++router.post('/:id/aplicar', auth.soloAdmin, async (req, res) => {
+   try {
+     const monto = Number(req.body.monto) || 0;
+     const anticipo = await Anticipo.findById(req.params.id);
+@@ -66,7 +66,7 @@ router.post('/:id/aplicar', auth, async (req, res) => {
+ });
+ 
+ // DELETE /api/anticipos/:id
+-router.delete('/:id', auth, async (req, res) => {
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const anticipo = await Anticipo.findByIdAndDelete(req.params.id);
+     if (!anticipo) return res.status(404).json({ message: 'Anticipo no encontrado.' });
+diff --git a/backend/src/routes/auth.js b/backend/src/routes/auth.js
+index 69fc46d..ad0785a 100644
+--- a/backend/src/routes/auth.js
++++ b/backend/src/routes/auth.js
+@@ -2,10 +2,25 @@ const express = require('express');
+ const router = express.Router();
+ const jwt = require('jsonwebtoken');
+ const User = require('../models/User');
++const auth = require('../middleware/auth');
++const { validarPassword } = require('../utils/passwords');
+ 
+ const JWT_SECRET = process.env.JWT_SECRET || 'logal_prime_secret_2024';
+ const JWT_EXPIRES = process.env.JWT_EXPIRES || '7d';
+ 
++function firmarToken(user) {
++  return jwt.sign(
++    {
++      id: user._id,
++      username: user.username,
++      nombre: user.nombre,
++      rol: user.rol
++    },
++    JWT_SECRET,
++    { expiresIn: JWT_EXPIRES }
++  );
++}
++
+ // POST /api/auth/login
+ router.post('/login', async (req, res) => {
+   try {
+@@ -15,7 +30,7 @@ router.post('/login', async (req, res) => {
+       return res.status(400).json({ message: 'Usuario y contraseña requeridos.' });
+     }
+ 
+-    const user = await User.findOne({ username: username.toLowerCase() });
++    const user = await User.findOne({ username: String(username).toLowerCase().trim() });
+     if (!user) {
+       return res.status(401).json({ message: 'Credenciales inválidas.' });
+     }
+@@ -25,20 +40,18 @@ router.post('/login', async (req, res) => {
+       return res.status(401).json({ message: 'Credenciales inválidas.' });
+     }
+ 
+-    const token = jwt.sign(
+-      { id: user._id, username: user.username, nombre: user.nombre },
+-      JWT_SECRET,
+-      { expiresIn: JWT_EXPIRES }
+-    );
++    // Una cuenta desactivada no puede iniciar sesión, aunque la contraseña
++    // sea correcta.
++    if (user.activo === false) {
++      return res.status(403).json({ message: 'Cuenta desactivada. Contacta al administrador.' });
++    }
++
++    user.ultimoAcceso = new Date();
++    await user.save({ validateBeforeSave: false });
+ 
+     res.json({
+-      token,
+-      user: {
+-        id: user._id,
+-        username: user.username,
+-        nombre: user.nombre,
+-        empresa: user.empresa
+-      }
++      token: firmarToken(user),
++      user: user.toPublic()
+     });
+   } catch (err) {
+     console.error(err);
+@@ -46,7 +59,7 @@ router.post('/login', async (req, res) => {
+   }
+ });
+ 
+-// POST /api/auth/setup - crear usuario inicial (solo si no existe ninguno)
++// POST /api/auth/setup — crear el primer administrador (solo si no hay usuarios)
+ router.post('/setup', async (req, res) => {
+   try {
+     const count = await User.countDocuments();
+@@ -59,10 +72,15 @@ router.post('/setup', async (req, res) => {
+       return res.status(400).json({ message: 'Username, password y nombre son requeridos.' });
+     }
+ 
++    const problema = validarPassword(password);
++    if (problema) return res.status(400).json({ message: problema });
++
+     const user = new User({
+-      username: username.toLowerCase(),
++      username: String(username).toLowerCase().trim(),
+       password,
+       nombre,
++      rol: 'admin',
++      activo: true,
+       empresa: 'LOGAL Prime'
+     });
+ 
+@@ -75,14 +93,45 @@ router.post('/setup', async (req, res) => {
+   }
+ });
+ 
+-// GET /api/auth/me - verificar token
+-router.get('/me', require('../middleware/auth'), async (req, res) => {
++// GET /api/auth/me — verificar el token y devolver el perfil (con rol)
++router.get('/me', auth, async (req, res) => {
+   try {
+-    const user = await User.findById(req.user.id).select('-password');
+-    res.json(user);
++    res.json(req.usuarioDoc.toPublic());
+   } catch (err) {
+     res.status(500).json({ message: 'Error del servidor.' });
+   }
+ });
+ 
++// POST /api/auth/cambiar-password — cualquier usuario cambia SU propia clave
++router.post('/cambiar-password', auth, async (req, res) => {
++  try {
++    const { passwordActual, passwordNueva } = req.body;
++
++    if (!passwordActual || !passwordNueva) {
++      return res.status(400).json({ message: 'Debes enviar la contraseña actual y la nueva.' });
++    }
++
++    const problema = validarPassword(passwordNueva);
++    if (problema) return res.status(400).json({ message: problema });
++
++    // Se recarga con el hash porque req.usuarioDoc viene sin contraseña.
++    const user = await User.findById(req.user.id);
++    if (!user) return res.status(404).json({ message: 'Usuario no encontrado.' });
++
++    const isMatch = await user.comparePassword(passwordActual);
++    if (!isMatch) {
++      return res.status(401).json({ message: 'La contraseña actual no es correcta.' });
++    }
++
++    user.password = passwordNueva;
++    await user.save();
++
++    // Se emite un token nuevo para que la sesión actual siga viva.
++    res.json({ message: 'Contraseña actualizada.', token: firmarToken(user) });
++  } catch (err) {
++    console.error(err);
++    res.status(500).json({ message: 'Error del servidor.' });
++  }
++});
++
+ module.exports = router;
+diff --git a/backend/src/routes/clientes.js b/backend/src/routes/clientes.js
+index f76fa98..11a13fe 100644
+--- a/backend/src/routes/clientes.js
++++ b/backend/src/routes/clientes.js
+@@ -18,7 +18,7 @@ router.get('/', auth, async (req, res) => {
+ });
+ 
+ // GET /api/clientes/:id/resumen — ingresos históricos + anticipos
+-router.get('/:id/resumen', auth, async (req, res) => {
++router.get('/:id/resumen', auth.soloAdmin, async (req, res) => {
+   try {
+     const cliente = await Cliente.findById(req.params.id);
+     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });
+@@ -45,7 +45,7 @@ router.get('/:id/resumen', auth, async (req, res) => {
+ });
+ 
+ // POST /api/clientes
+-router.post('/', auth, async (req, res) => {
++router.post('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const cliente = await Cliente.create(req.body);
+     res.status(201).json(cliente);
+@@ -55,7 +55,7 @@ router.post('/', auth, async (req, res) => {
+ });
+ 
+ // PUT /api/clientes/:id
+-router.put('/:id', auth, async (req, res) => {
++router.put('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const cliente = await Cliente.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });
+@@ -66,7 +66,7 @@ router.put('/:id', auth, async (req, res) => {
+ });
+ 
+ // DELETE /api/clientes/:id  (baja lógica)
+-router.delete('/:id', auth, async (req, res) => {
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const cliente = await Cliente.findByIdAndUpdate(req.params.id, { activo: false }, { new: true });
+     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });
+diff --git a/backend/src/routes/mantenimiento.js b/backend/src/routes/mantenimiento.js
+index f3c22d1..2c4dee9 100644
+--- a/backend/src/routes/mantenimiento.js
++++ b/backend/src/routes/mantenimiento.js
+@@ -4,7 +4,7 @@ const auth = require('../middleware/auth');
+ const Mantenimiento = require('../models/Mantenimiento');
+ 
+ // GET /api/mantenimiento
+-router.get('/', auth, async (req, res) => {
++router.get('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const { vehiculo, estado } = req.query;
+     const filter = {};
+@@ -21,7 +21,7 @@ router.get('/', auth, async (req, res) => {
+ });
+ 
+ // POST /api/mantenimiento
+-router.post('/', auth, async (req, res) => {
++router.post('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const item = new Mantenimiento(req.body);
+     await item.save();
+@@ -32,7 +32,7 @@ router.post('/', auth, async (req, res) => {
+ });
+ 
+ // PUT /api/mantenimiento/:id
+-router.put('/:id', auth, async (req, res) => {
++router.put('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const item = await Mantenimiento.findByIdAndUpdate(req.params.id, req.body, { new: true });
+     if (!item) return res.status(404).json({ message: 'Registro no encontrado.' });
+@@ -43,7 +43,7 @@ router.put('/:id', auth, async (req, res) => {
+ });
+ 
+ // DELETE /api/mantenimiento/:id
+-router.delete('/:id', auth, async (req, res) => {
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const item = await Mantenimiento.findByIdAndDelete(req.params.id);
+     if (!item) return res.status(404).json({ message: 'Registro no encontrado.' });
+diff --git a/backend/src/routes/pagos.js b/backend/src/routes/pagos.js
+index d793a19..4d94aeb 100644
+--- a/backend/src/routes/pagos.js
++++ b/backend/src/routes/pagos.js
+@@ -21,7 +21,7 @@ async function calcularLiquidacion({ vehiculoId, fechaInicio, fechaFin, tipoLiqu
+ }
+ 
+ // GET /api/pagos
+-router.get('/', auth, async (req, res) => {
++router.get('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const { vehiculo, estado, limit = 20, page = 1 } = req.query;
+     const filter = {};
+@@ -43,7 +43,7 @@ router.get('/', auth, async (req, res) => {
+ });
+ 
+ // GET /api/pagos/:id
+-router.get('/:id', auth, async (req, res) => {
++router.get('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const pago = await Pago.findById(req.params.id)
+       .populate('vehiculo')
+@@ -56,7 +56,7 @@ router.get('/:id', auth, async (req, res) => {
+ });
+ 
+ // POST /api/pagos/previsualizar - calcula la liquidación SIN guardar (paso 2 del asistente)
+-router.post('/previsualizar', auth, async (req, res) => {
++router.post('/previsualizar', auth.soloAdmin, async (req, res) => {
+   try {
+     const { registros, liq } = await calcularLiquidacion(req.body);
+     if (registros.length === 0) return res.status(400).json({ message: 'No hay registros para este período.' });
+@@ -78,7 +78,7 @@ router.post('/previsualizar', auth, async (req, res) => {
+ });
+ 
+ // POST /api/pagos/generar - genera y GUARDA la liquidación desde los registros
+-router.post('/generar', auth, async (req, res) => {
++router.post('/generar', auth.soloAdmin, async (req, res) => {
+   try {
+     const {
+       vehiculoId, fechaInicio, fechaFin, tipo = 'quincenal',
+@@ -118,7 +118,7 @@ router.post('/generar', auth, async (req, res) => {
+ });
+ 
+ // POST /api/pagos
+-router.post('/', auth, async (req, res) => {
++router.post('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const pago = new Pago(req.body);
+     await pago.save();
+@@ -129,7 +129,7 @@ router.post('/', auth, async (req, res) => {
+ });
+ 
+ // PUT /api/pagos/:id
+-router.put('/:id', auth, async (req, res) => {
++router.put('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const pago = await Pago.findByIdAndUpdate(req.params.id, req.body, { new: true });
+     if (!pago) return res.status(404).json({ message: 'Pago no encontrado.' });
+@@ -140,7 +140,7 @@ router.put('/:id', auth, async (req, res) => {
+ });
+ 
+ // DELETE /api/pagos/:id
+-router.delete('/:id', auth, async (req, res) => {
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const pago = await Pago.findByIdAndDelete(req.params.id);
+     if (!pago) return res.status(404).json({ message: 'Pago no encontrado.' });
+diff --git a/backend/src/routes/registros.js b/backend/src/routes/registros.js
+index 92c573e..179c62c 100644
+--- a/backend/src/routes/registros.js
++++ b/backend/src/routes/registros.js
+@@ -4,6 +4,20 @@ const auth = require('../middleware/auth');
+ const RegistroDiario = require('../models/RegistroDiario');
+ const Vehicle = require('../models/Vehicle');
+ const { validarRegistro } = require('../utils/contabilidad');
++const {
++  esAdmin: usuarioEsAdmin,
++  puedeEditarRegistro,
++  fechaPermitida: validarFecha,
++  sanearEntradaRegistro,
++  vistaRegistroSegunRol
++} = require('../utils/permisos');
++
++// Adaptadores finos sobre utils/permisos.js (la fuente de verdad).
++const esAdmin = (req) => usuarioEsAdmin(req.user);
++const puedeEditar = (req, registro) => puedeEditarRegistro(req.user, registro);
++const fechaPermitida = (req, fecha) => validarFecha(req.user, fecha);
++const sanearEntrada = (req) => sanearEntradaRegistro(req.user, req.body);
++const vistaSegunRol = (req, registro) => vistaRegistroSegunRol(req.user, registro);
+ 
+ // Busca el registro anterior del mismo vehículo (para validar el odómetro).
+ async function registroAnterior(vehiculoId, fecha) {
+@@ -19,6 +33,19 @@ router.get('/ultimo', auth, async (req, res) => {
+   try {
+     if (!req.query.vehiculo) return res.json({ registro: null });
+     const registro = await RegistroDiario.findOne({ vehiculo: req.query.vehiculo }).sort({ fecha: -1 });
++    // Solo se devuelve el odómetro: es lo único que el formulario necesita
++    // precargar y así el conductor no ve las cifras del día de otro turno.
++    if (registro && !esAdmin(req)) {
++      return res.json({
++        registro: {
++          _id: registro._id,
++          fecha: registro.fecha,
++          kmFin: registro.kmFin,
++          kmInicio: registro.kmInicio,
++          vehiculo: registro.vehiculo
++        }
++      });
++    }
+     res.json({ registro });
+   } catch (err) {
+     res.status(500).json({ message: err.message });
+@@ -26,11 +53,14 @@ router.get('/ultimo', auth, async (req, res) => {
+ });
+ 
+ // GET /api/registros?vehiculo=&desde=&hasta=&limit=&page=
++// El admin ve todo; el conductor solo su propio historial.
+ router.get('/', auth, async (req, res) => {
+   try {
+     const { vehiculo, desde, hasta, limit = 50, page = 1 } = req.query;
+     const filter = {};
+ 
++    if (!esAdmin(req)) filter.creadoPor = req.user.id;
++
+     if (vehiculo) filter.vehiculo = vehiculo;
+     if (desde || hasta) {
+       filter.fecha = {};
+@@ -47,7 +77,7 @@ router.get('/', auth, async (req, res) => {
+       .limit(parseInt(limit));
+ 
+     res.json({
+-      registros,
++      registros: registros.map(r => vistaSegunRol(req, r)),
+       total,
+       page: parseInt(page),
+       totalPages: Math.ceil(total / parseInt(limit))
+@@ -63,38 +93,49 @@ router.get('/:id', auth, async (req, res) => {
+     const registro = await RegistroDiario.findById(req.params.id)
+       .populate('vehiculo', 'placa nombre conductor');
+     if (!registro) return res.status(404).json({ message: 'Registro no encontrado.' });
+-    res.json(registro);
++
++    if (!esAdmin(req) && String(registro.creadoPor || '') !== req.user.id) {
++      return res.status(403).json({ message: 'Solo puedes ver los registros que tú capturaste.' });
++    }
++
++    res.json(vistaSegunRol(req, registro));
+   } catch (err) {
+     res.status(500).json({ message: err.message });
+   }
+ });
+ 
+-// POST /api/registros
++// POST /api/registros — admin y conductor
+ router.post('/', auth, async (req, res) => {
+   try {
+-    const registro = new RegistroDiario(req.body);
++    const datos = sanearEntrada(req);
++
++    const problemaFecha = fechaPermitida(req, datos.fecha);
++    if (problemaFecha) return res.status(403).json({ message: problemaFecha });
++
++    const registro = new RegistroDiario({
++      ...datos,
++      creadoPor: req.user.id,
++      modificadoPor: req.user.id
++    });
+     await registro.save();
+ 
+-    // Update vehicle km if provided
+-    if (req.body.kmFin && req.body.vehiculo) {
+-      await Vehicle.findByIdAndUpdate(req.body.vehiculo, {
+-        kmActual: req.body.kmFin
+-      });
++    if (datos.kmFin && datos.vehiculo) {
++      await Vehicle.findByIdAndUpdate(datos.vehiculo, { kmActual: datos.kmFin });
+     }
+ 
+     // Advertencias de captura (no bloquean; informan al usuario).
+-    const prev = await registroAnterior(req.body.vehiculo, req.body.fecha);
+-    const advertencias = validarRegistro(req.body, prev);
++    const prev = await registroAnterior(datos.vehiculo, datos.fecha);
++    const advertencias = validarRegistro(datos, prev);
+ 
+-    res.status(201).json({ registro, advertencias });
++    res.status(201).json({ registro: vistaSegunRol(req, registro), advertencias });
+   } catch (err) {
+     res.status(400).json({ message: err.message });
+   }
+ });
+ 
+-// POST /api/registros/importar — carga masiva (ej. importar quincena desde Excel)
++// POST /api/registros/importar — carga masiva (solo admin)
+ // Espera { registros: [ {fecha, vehiculo, placa, conductor, ingresos, ...}, ... ] }
+-router.post('/importar', auth, async (req, res) => {
++router.post('/importar', auth.soloAdmin, async (req, res) => {
+   try {
+     const filas = Array.isArray(req.body.registros) ? req.body.registros : [];
+     if (filas.length === 0) return res.status(400).json({ message: 'No se recibieron filas para importar.' });
+@@ -102,7 +143,11 @@ router.post('/importar', auth, async (req, res) => {
+     const resultados = { insertados: 0, errores: [] };
+     for (let i = 0; i < filas.length; i++) {
+       try {
+-        const doc = new RegistroDiario(filas[i]);
++        const doc = new RegistroDiario({
++          ...filas[i],
++          creadoPor: req.user.id,
++          modificadoPor: req.user.id
++        });
+         await doc.save();
+         resultados.insertados++;
+       } catch (e) {
+@@ -123,12 +168,22 @@ router.post('/importar', auth, async (req, res) => {
+   }
+ });
+ 
+-// PUT /api/registros/:id
++// PUT /api/registros/:id — admin siempre; conductor solo lo suyo y en caliente
+ router.put('/:id', auth, async (req, res) => {
+   try {
+     const registro = await RegistroDiario.findById(req.params.id);
+     if (!registro) return res.status(404).json({ message: 'Registro no encontrado.' });
+ 
++    const permiso = puedeEditar(req, registro);
++    if (!permiso.ok) return res.status(403).json({ message: permiso.message });
++
++    const datos = sanearEntrada(req);
++
++    if (datos.fecha !== undefined) {
++      const problemaFecha = fechaPermitida(req, datos.fecha);
++      if (problemaFecha) return res.status(403).json({ message: problemaFecha });
++    }
++
+     // Asignar solo campos editables; los derivados (totalIngresos,
+     // totalEgresos, kmDia, utilidadNeta) los recalcula el hook pre-save.
+     const campos = [
+@@ -137,27 +192,31 @@ router.put('/:id', auth, async (req, res) => {
+       'kmInicio', 'kmFin', 'pagoConductor', 'observaciones'
+     ];
+     campos.forEach((c) => {
+-      if (req.body[c] !== undefined) registro[c] = req.body[c];
++      if (datos[c] !== undefined) registro[c] = datos[c];
+     });
+-    if (req.body.ingresos) {
++    if (datos.ingresos) {
+       const actual = registro.ingresos?.toObject ? registro.ingresos.toObject() : (registro.ingresos || {});
+-      registro.ingresos = { ...actual, ...req.body.ingresos };
++      registro.ingresos = { ...actual, ...datos.ingresos };
++    }
++    if (datos.ingresosPorCliente !== undefined) {
++      registro.ingresosPorCliente = datos.ingresosPorCliente;
+     }
+ 
++    registro.modificadoPor = req.user.id;
+     await registro.save(); // ejecuta recalcular()
+ 
+-    if (req.body.kmFin && registro.vehiculo) {
+-      await Vehicle.findByIdAndUpdate(registro.vehiculo, { kmActual: req.body.kmFin });
++    if (datos.kmFin && registro.vehiculo) {
++      await Vehicle.findByIdAndUpdate(registro.vehiculo, { kmActual: datos.kmFin });
+     }
+ 
+-    res.json(registro);
++    res.json(vistaSegunRol(req, registro));
+   } catch (err) {
+     res.status(400).json({ message: err.message });
+   }
+ });
+ 
+-// DELETE /api/registros/:id
+-router.delete('/:id', auth, async (req, res) => {
++// DELETE /api/registros/:id — solo admin
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const registro = await RegistroDiario.findByIdAndDelete(req.params.id);
+     if (!registro) return res.status(404).json({ message: 'Registro no encontrado.' });
+diff --git a/backend/src/routes/stats.js b/backend/src/routes/stats.js
+index 469ce05..e6c212e 100644
+--- a/backend/src/routes/stats.js
++++ b/backend/src/routes/stats.js
+@@ -5,7 +5,7 @@ const RegistroDiario = require('../models/RegistroDiario');
+ const Mantenimiento = require('../models/Mantenimiento');
+ 
+ // GET /api/stats/dashboard?vehiculo=&desde=&hasta=
+-router.get('/dashboard', auth, async (req, res) => {
++router.get('/dashboard', auth.soloAdmin, async (req, res) => {
+   try {
+     const { vehiculo, desde, hasta } = req.query;
+     const filter = {};
+@@ -138,7 +138,7 @@ router.get('/dashboard', auth, async (req, res) => {
+ });
+ 
+ // GET /api/stats/historico?vehiculo=&meses=6
+-router.get('/historico', auth, async (req, res) => {
++router.get('/historico', auth.soloAdmin, async (req, res) => {
+   try {
+     const { vehiculo, meses = 6 } = req.query;
+     const filter = {};
+diff --git a/backend/src/routes/usuarios.js b/backend/src/routes/usuarios.js
+new file mode 100644
+index 0000000..a19353e
+--- /dev/null
++++ b/backend/src/routes/usuarios.js
+@@ -0,0 +1,193 @@
++const express = require('express');
++const router = express.Router();
++const auth = require('../middleware/auth');
++const User = require('../models/User');
++const { validarPassword, generarPasswordTemporal } = require('../utils/passwords');
++
++// Todas las rutas de este módulo son exclusivas del administrador.
++router.use(auth.soloAdmin);
++
++/** Cuenta cuántos administradores activos quedarían excluyendo a `exceptoId`. */
++async function otrosAdminsActivos(exceptoId) {
++  return User.countDocuments({
++    _id: { $ne: exceptoId },
++    rol: 'admin',
++    activo: { $ne: false }
++  });
++}
++
++function errorDuplicado(err, res) {
++  if (err && err.code === 11000) {
++    res.status(409).json({ message: 'Ese nombre de usuario ya está en uso.' });
++    return true;
++  }
++  return false;
++}
++
++// GET /api/usuarios — listar todos los usuarios
++router.get('/', async (req, res) => {
++  try {
++    const usuarios = await User.find().sort({ rol: 1, nombre: 1 });
++    res.json({ usuarios: usuarios.map(u => u.toPublic()) });
++  } catch (err) {
++    res.status(500).json({ message: err.message });
++  }
++});
++
++// POST /api/usuarios — crear un usuario (admin o conductor)
++router.post('/', async (req, res) => {
++  try {
++    const { username, nombre, rol } = req.body;
++    let { password } = req.body;
++
++    if (!username || !nombre) {
++      return res.status(400).json({ message: 'Usuario y nombre son obligatorios.' });
++    }
++    if (!User.ROLES.includes(rol)) {
++      return res.status(400).json({ message: 'Debes indicar un rol válido: "admin" o "conductor".' });
++    }
++
++    // Si no se envía contraseña, se genera una temporal y se devuelve UNA
++    // sola vez para que el admin se la entregue al conductor.
++    let temporal = false;
++    if (!password) {
++      password = generarPasswordTemporal();
++      temporal = true;
++    } else {
++      const problema = validarPassword(password);
++      if (problema) return res.status(400).json({ message: problema });
++    }
++
++    const limpio = String(username).toLowerCase().trim();
++    if (await User.exists({ username: limpio })) {
++      return res.status(409).json({ message: 'Ese nombre de usuario ya está en uso.' });
++    }
++
++    const usuario = new User({
++      username: limpio,
++      password,
++      nombre: String(nombre).trim(),
++      rol,
++      activo: req.body.activo !== false,
++      creadoPor: req.user.id
++    });
++
++    await usuario.save();
++
++    res.status(201).json({
++      usuario: usuario.toPublic(),
++      passwordTemporal: temporal ? password : undefined,
++      message: temporal
++        ? 'Usuario creado. Guarda la contraseña temporal: no se vuelve a mostrar.'
++        : 'Usuario creado.'
++    });
++  } catch (err) {
++    if (errorDuplicado(err, res)) return;
++    res.status(400).json({ message: err.message });
++  }
++});
++
++// PUT /api/usuarios/:id — editar nombre, rol o estado
++router.put('/:id', async (req, res) => {
++  try {
++    const usuario = await User.findById(req.params.id);
++    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado.' });
++
++    const esYoMismo = String(usuario._id) === req.user.id;
++
++    if (req.body.nombre !== undefined) usuario.nombre = String(req.body.nombre).trim();
++
++    if (req.body.username !== undefined) {
++      const limpio = String(req.body.username).toLowerCase().trim();
++      if (limpio !== usuario.username && await User.exists({ username: limpio })) {
++        return res.status(409).json({ message: 'Ese nombre de usuario ya está en uso.' });
++      }
++      usuario.username = limpio;
++    }
++
++    if (req.body.rol !== undefined) {
++      if (!User.ROLES.includes(req.body.rol)) {
++        return res.status(400).json({ message: 'Rol inválido. Debe ser "admin" o "conductor".' });
++      }
++      if (esYoMismo && req.body.rol !== 'admin') {
++        return res.status(400).json({ message: 'No puedes quitarte a ti mismo el rol de administrador.' });
++      }
++      // Nunca dejar el sistema sin un administrador activo.
++      if (usuario.rol === 'admin' && req.body.rol !== 'admin') {
++        if (await otrosAdminsActivos(usuario._id) === 0) {
++          return res.status(400).json({ message: 'Debe quedar al menos un administrador activo.' });
++        }
++      }
++      usuario.rol = req.body.rol;
++    }
++
++    if (req.body.activo !== undefined) {
++      const activo = req.body.activo === true || req.body.activo === 'true';
++      if (esYoMismo && !activo) {
++        return res.status(400).json({ message: 'No puedes desactivar tu propia cuenta.' });
++      }
++      if (!activo && usuario.rol === 'admin' && await otrosAdminsActivos(usuario._id) === 0) {
++        return res.status(400).json({ message: 'Debe quedar al menos un administrador activo.' });
++      }
++      usuario.activo = activo;
++    }
++
++    await usuario.save();
++    res.json({ usuario: usuario.toPublic(), message: 'Usuario actualizado.' });
++  } catch (err) {
++    if (errorDuplicado(err, res)) return;
++    res.status(400).json({ message: err.message });
++  }
++});
++
++// PUT /api/usuarios/:id/password — el admin restablece la clave de alguien
++router.put('/:id/password', async (req, res) => {
++  try {
++    const usuario = await User.findById(req.params.id);
++    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado.' });
++
++    let { password } = req.body;
++    let temporal = false;
++
++    if (!password) {
++      password = generarPasswordTemporal();
++      temporal = true;
++    } else {
++      const problema = validarPassword(password);
++      if (problema) return res.status(400).json({ message: problema });
++    }
++
++    usuario.password = password;
++    await usuario.save();
++
++    res.json({
++      message: `Contraseña de ${usuario.nombre} actualizada.`,
++      passwordTemporal: temporal ? password : undefined
++    });
++  } catch (err) {
++    res.status(400).json({ message: err.message });
++  }
++});
++
++// DELETE /api/usuarios/:id — eliminar un usuario
++router.delete('/:id', async (req, res) => {
++  try {
++    if (String(req.params.id) === req.user.id) {
++      return res.status(400).json({ message: 'No puedes eliminar tu propia cuenta.' });
++    }
++
++    const usuario = await User.findById(req.params.id);
++    if (!usuario) return res.status(404).json({ message: 'Usuario no encontrado.' });
++
++    if (usuario.rol === 'admin' && await otrosAdminsActivos(usuario._id) === 0) {
++      return res.status(400).json({ message: 'Debe quedar al menos un administrador activo.' });
++    }
++
++    await usuario.deleteOne();
++    res.json({ message: 'Usuario eliminado.' });
++  } catch (err) {
++    res.status(500).json({ message: err.message });
++  }
++});
++
++module.exports = router;
+diff --git a/backend/src/routes/vehicles.js b/backend/src/routes/vehicles.js
+index 3141edf..8495a78 100644
+--- a/backend/src/routes/vehicles.js
++++ b/backend/src/routes/vehicles.js
+@@ -25,7 +25,7 @@ router.get('/:id', auth, async (req, res) => {
+ });
+ 
+ // POST /api/vehicles
+-router.post('/', auth, async (req, res) => {
++router.post('/', auth.soloAdmin, async (req, res) => {
+   try {
+     const vehicle = new Vehicle(req.body);
+     await vehicle.save();
+@@ -39,7 +39,7 @@ router.post('/', auth, async (req, res) => {
+ });
+ 
+ // PUT /api/vehicles/:id
+-router.put('/:id', auth, async (req, res) => {
++router.put('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const vehicle = await Vehicle.findByIdAndUpdate(
+       req.params.id,
+@@ -54,7 +54,7 @@ router.put('/:id', auth, async (req, res) => {
+ });
+ 
+ // DELETE /api/vehicles/:id
+-router.delete('/:id', auth, async (req, res) => {
++router.delete('/:id', auth.soloAdmin, async (req, res) => {
+   try {
+     const vehicle = await Vehicle.findByIdAndDelete(req.params.id);
+     if (!vehicle) return res.status(404).json({ message: 'Vehículo no encontrado.' });
+diff --git a/backend/src/utils/passwords.js b/backend/src/utils/passwords.js
+new file mode 100644
+index 0000000..33b004f
+--- /dev/null
++++ b/backend/src/utils/passwords.js
+@@ -0,0 +1,59 @@
++/**
++ * Reglas de contraseña — única fuente de verdad.
++ *
++ * Deliberadamente moderadas: el equipo son conductores capturando datos
++ * desde el celular, no una banca en línea. Se exige longitud (que es lo que
++ * de verdad frena un ataque por fuerza bruta) y se bloquean las claves
++ * obvias, sin obligar a símbolos raros que terminan escritos en un papel
++ * pegado al tablero del carro.
++ */
++
++const LONGITUD_MINIMA = 8;
++
++const CLAVES_PROHIBIDAS = new Set([
++  '12345678', '123456789', '1234567890', 'password', 'contrasena', 'contraseña',
++  'qwertyui', 'logalprime', 'logal2024', 'logal2025', 'logal2026',
++  'admin123', 'conductor', 'abcd1234', '11111111', '00000000'
++]);
++
++/**
++ * Devuelve un mensaje de error si la contraseña no sirve, o null si está bien.
++ * @param {string} password
++ * @returns {string|null}
++ */
++function validarPassword(password) {
++  if (typeof password !== 'string' || password.trim().length === 0) {
++    return 'La contraseña es obligatoria.';
++  }
++  if (password.length < LONGITUD_MINIMA) {
++    return `La contraseña debe tener al menos ${LONGITUD_MINIMA} caracteres.`;
++  }
++  if (password.length > 128) {
++    return 'La contraseña no puede superar los 128 caracteres.';
++  }
++  if (CLAVES_PROHIBIDAS.has(password.toLowerCase())) {
++    return 'Esa contraseña es demasiado común. Elige otra.';
++  }
++  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
++    return 'La contraseña debe combinar letras y números.';
++  }
++  return null;
++}
++
++/**
++ * Genera una contraseña temporal legible para entregarle a un conductor
++ * nuevo (evita caracteres ambiguos como l, 1, O, 0).
++ */
++function generarPasswordTemporal() {
++  const letras = 'abcdefghijkmnpqrstuvwxyz';
++  const mayus = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
++  const numeros = '23456789';
++  const pick = (set) => set[Math.floor(Math.random() * set.length)];
++
++  let out = pick(mayus);
++  for (let i = 0; i < 5; i++) out += pick(letras);
++  for (let i = 0; i < 3; i++) out += pick(numeros);
++  return out;
++}
++
++module.exports = { validarPassword, generarPasswordTemporal, LONGITUD_MINIMA };
+diff --git a/backend/src/utils/permisos.js b/backend/src/utils/permisos.js
+new file mode 100644
+index 0000000..920d6ed
+--- /dev/null
++++ b/backend/src/utils/permisos.js
+@@ -0,0 +1,130 @@
++/**
++ * Reglas de permiso — única fuente de verdad.
++ *
++ * Vive aparte de las rutas (igual que contabilidad.js) para poder probarla
++ * sin levantar Express ni MongoDB, y para que las reglas no queden
++ * repartidas por el código.
++ *
++ * Roles:
++ *   admin     — acceso total.
++ *   conductor — solo reporta ingresos y egresos, y ve su propio historial.
++ */
++
++const TZ = 'America/Bogota';
++
++// Ventana en la que un conductor puede corregir un registro que él capturó:
++// mientras la fecha del registro sea HOY, o mientras no hayan pasado más de
++// 6 horas desde que lo creó (cubre el turno que cierra después de medianoche).
++const HORAS_GRACIA_EDICION = 6;
++
++// Cuántos días hacia atrás puede registrar un conductor. Evita que se toquen
++// quincenas ya liquidadas. El admin no tiene este límite.
++const DIAS_ATRAS_PERMITIDOS = 7;
++
++/** Fecha de hoy en Colombia, en formato YYYY-MM-DD. */
++function hoyLocal(ahora = Date.now()) {
++  return new Date(ahora).toLocaleDateString('en-CA', { timeZone: TZ });
++}
++
++/** Parte de fecha (YYYY-MM-DD) de un valor guardado como fecha-solo en UTC. */
++function soloFecha(valor) {
++  const d = new Date(valor);
++  if (isNaN(d.getTime())) return null;
++  return d.toISOString().slice(0, 10);
++}
++
++/** Diferencia en días entre dos cadenas YYYY-MM-DD (a − b). */
++function diasEntre(a, b) {
++  return Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000);
++}
++
++const esAdmin = (usuario) => usuario?.rol === 'admin';
++
++/**
++ * ¿Este usuario puede modificar este registro?
++ * @returns {{ok: boolean, message?: string}}
++ */
++function puedeEditarRegistro(usuario, registro, ahora = Date.now()) {
++  if (esAdmin(usuario)) return { ok: true };
++  if (!registro) return { ok: false, message: 'Registro no encontrado.' };
++
++  if (String(registro.creadoPor || '') !== String(usuario?.id || '')) {
++    return { ok: false, message: 'Solo puedes modificar los registros que tú capturaste.' };
++  }
++
++  const esDeHoy = soloFecha(registro.fecha) === hoyLocal(ahora);
++  const creado = registro.createdAt ? new Date(registro.createdAt).getTime() : null;
++  const horas = creado ? (ahora - creado) / 3600000 : Infinity;
++
++  if (esDeHoy || horas <= HORAS_GRACIA_EDICION) return { ok: true };
++
++  return {
++    ok: false,
++    message: 'Este registro ya no se puede editar. Pídele el ajuste al administrador.'
++  };
++}
++
++/**
++ * Valida la fecha que envía un conductor al crear o editar.
++ * @returns {string|null} mensaje de error, o null si la fecha es válida.
++ */
++function fechaPermitida(usuario, fecha, ahora = Date.now()) {
++  if (esAdmin(usuario)) return null;
++
++  const f = soloFecha(fecha);
++  if (!f) return 'La fecha del registro no es válida.';
++
++  const diff = diasEntre(f, hoyLocal(ahora));
++  if (diff > 0) return 'No puedes registrar días futuros.';
++  if (diff < -DIAS_ATRAS_PERMITIDOS) {
++    return `Solo puedes registrar hasta ${DIAS_ATRAS_PERMITIDOS} días hacia atrás. Para fechas anteriores, pídele el registro al administrador.`;
++  }
++  return null;
++}
++
++/**
++ * Quita del cuerpo de la petición los campos que el cliente no puede fijar.
++ * La trazabilidad la pone el servidor; los totales los recalcula el modelo; y
++ * el pago al conductor es decisión de la empresa, no de quien conduce.
++ */
++function sanearEntradaRegistro(usuario, body = {}) {
++  const limpio = { ...body };
++
++  delete limpio.creadoPor;
++  delete limpio.modificadoPor;
++  delete limpio.totalIngresos;
++  delete limpio.totalEgresos;
++  delete limpio.utilidadNeta;
++  delete limpio.kmDia;
++
++  if (!esAdmin(usuario)) delete limpio.pagoConductor;
++
++  return limpio;
++}
++
++/**
++ * Vista de un registro según el rol. El conductor ve lo que capturó, pero no
++ * los indicadores de rentabilidad de la empresa.
++ */
++function vistaRegistroSegunRol(usuario, registro) {
++  const obj = registro?.toObject ? registro.toObject() : { ...registro };
++  if (esAdmin(usuario)) return obj;
++
++  delete obj.utilidadNeta;
++  delete obj.pagoConductor;
++  return obj;
++}
++
++module.exports = {
++  TZ,
++  HORAS_GRACIA_EDICION,
++  DIAS_ATRAS_PERMITIDOS,
++  hoyLocal,
++  soloFecha,
++  diasEntre,
++  esAdmin,
++  puedeEditarRegistro,
++  fechaPermitida,
++  sanearEntradaRegistro,
++  vistaRegistroSegunRol
++};
+diff --git a/backend/test/auth-http.test.js b/backend/test/auth-http.test.js
+new file mode 100644
+index 0000000..6212b51
+--- /dev/null
++++ b/backend/test/auth-http.test.js
+@@ -0,0 +1,172 @@
++/**
++ * Prueba de extremo a extremo de la autorización.
++ * Ejecutar:  node test/auth-http.test.js
++ *
++ * Levanta el servidor Express REAL y le pega peticiones HTTP con tokens de
++ * admin, de conductor, de cuenta desactivada y de cuenta borrada, para
++ * comprobar los códigos de respuesta.
++ *
++ * No necesita MongoDB: se sustituyen `mongoose.connect` y `User.findById`
++ * por dobles en memoria. Lo que se está probando aquí es la capa de
++ * autorización (middleware + guards de las rutas), no la persistencia.
++ */
++const assert = require('assert');
++const http = require('http');
++const jwt = require('jsonwebtoken');
++const mongoose = require('mongoose');
++
++process.env.JWT_SECRET = 'secreto-de-prueba';
++process.env.NODE_ENV = 'test';
++
++// ── Dobles en memoria (antes de cargar la app) ────────────────
++mongoose.connect = async () => ({ conexionFalsa: true });
++// Las operaciones que sí toquen la BD fallan rápido en vez de quedarse
++// esperando: a esta prueba solo le importa el código de autorización.
++mongoose.set('bufferTimeoutMS', 200);
++
++const USUARIOS = {
++  admin1:  { _id: 'admin1', username: 'andres', nombre: 'Andrés', rol: 'admin', activo: true },
++  cond1:   { _id: 'cond1', username: 'carlos', nombre: 'Carlos', rol: 'conductor', activo: true },
++  inactivo:{ _id: 'inactivo', username: 'expulsado', nombre: 'Ex Conductor', rol: 'conductor', activo: false }
++};
++
++const User = require('../src/models/User');
++User.findById = (id) => ({
++  select: async () => {
++    const u = USUARIOS[id];
++    if (!u) return null;                       // cuenta borrada
++    return { ...u, toPublic: () => ({ ...u }) };
++  }
++});
++
++const app = require('../src/index');
++
++const token = (id) => jwt.sign({ id, rol: USUARIOS[id]?.rol }, process.env.JWT_SECRET, { expiresIn: '1h' });
++
++// ── Arranque del servidor ─────────────────────────────────────
++let servidor, base;
++let pasadas = 0, fallidas = 0;
++
++async function pedir(metodo, ruta, tk, cuerpo) {
++  const res = await fetch(base + ruta, {
++    method: metodo,
++    headers: {
++      'Content-Type': 'application/json',
++      ...(tk ? { Authorization: `Bearer ${tk}` } : {})
++    },
++    body: cuerpo ? JSON.stringify(cuerpo) : undefined
++  });
++  return res.status;
++}
++
++async function test(nombre, fn) {
++  try {
++    await fn();
++    pasadas++;
++    console.log('  ✓', nombre);
++  } catch (e) {
++    fallidas++;
++    console.log('  ✗', nombre);
++    console.log('     ', e.message.split('\n')[0]);
++  }
++}
++
++/** Afirma que la petición fue rechazada por permisos (403). */
++async function prohibido(metodo, ruta, tk, cuerpo) {
++  const status = await pedir(metodo, ruta, tk, cuerpo);
++  assert.strictEqual(status, 403, `${metodo} ${ruta} devolvió ${status}, se esperaba 403`);
++}
++
++/** Afirma que la petición PASÓ el control de acceso (lo que falle después da igual). */
++async function permitido(metodo, ruta, tk, cuerpo) {
++  const status = await pedir(metodo, ruta, tk, cuerpo);
++  assert.ok(status !== 401 && status !== 403,
++    `${metodo} ${ruta} devolvió ${status}: la autorización lo bloqueó y no debía`);
++}
++
++(async () => {
++  servidor = http.createServer(app);
++  await new Promise(r => servidor.listen(0, r));
++  base = `http://127.0.0.1:${servidor.address().port}`;
++
++  const ADMIN = token('admin1');
++  const CONDUCTOR = token('cond1');
++  const INACTIVO = token('inactivo');
++  const BORRADO = jwt.sign({ id: 'fantasma', rol: 'admin' }, process.env.JWT_SECRET, { expiresIn: '1h' });
++
++  console.log('\n▸ Sin credenciales');
++  await test('sin token no se entra a ningún módulo', async () => {
++    for (const r of ['/api/stats/dashboard', '/api/registros', '/api/usuarios', '/api/pagos']) {
++      assert.strictEqual(await pedir('GET', r, null), 401, r);
++    }
++  });
++  await test('un token firmado con otra llave se rechaza', async () => {
++    const falso = jwt.sign({ id: 'admin1', rol: 'admin' }, 'llave-equivocada');
++    assert.strictEqual(await pedir('GET', '/api/registros', falso), 401);
++  });
++
++  console.log('\n▸ Cuentas inválidas (el token sigue siendo criptográficamente válido)');
++  await test('una cuenta desactivada queda fuera de inmediato', async () => {
++    assert.strictEqual(await pedir('GET', '/api/registros', INACTIVO), 403);
++  });
++  await test('el token de una cuenta borrada ya no sirve', async () => {
++    assert.strictEqual(await pedir('GET', '/api/registros', BORRADO), 401);
++  });
++
++  console.log('\n▸ El conductor NO alcanza los módulos de contabilidad');
++  await test('dashboard y estadísticas: 403', async () => {
++    await prohibido('GET', '/api/stats/dashboard', CONDUCTOR);
++    await prohibido('GET', '/api/stats/historico', CONDUCTOR);
++  });
++  await test('pagos y liquidación: 403', async () => {
++    await prohibido('GET', '/api/pagos', CONDUCTOR);
++    await prohibido('POST', '/api/pagos/generar', CONDUCTOR, {});
++    await prohibido('POST', '/api/pagos/previsualizar', CONDUCTOR, {});
++  });
++  await test('mantenimiento y anticipos: 403', async () => {
++    await prohibido('GET', '/api/mantenimiento', CONDUCTOR);
++    await prohibido('GET', '/api/anticipos', CONDUCTOR);
++  });
++  await test('gestión de usuarios: 403', async () => {
++    await prohibido('GET', '/api/usuarios', CONDUCTOR);
++    await prohibido('POST', '/api/usuarios', CONDUCTOR, { username: 'x', nombre: 'X', rol: 'admin' });
++    await prohibido('DELETE', '/api/usuarios/admin1', CONDUCTOR);
++  });
++  await test('no puede crear ni borrar vehículos ni clientes', async () => {
++    await prohibido('POST', '/api/vehicles', CONDUCTOR, { placa: 'XXX123' });
++    await prohibido('DELETE', '/api/vehicles/1', CONDUCTOR);
++    await prohibido('POST', '/api/clientes', CONDUCTOR, { nombre: 'Nuevo' });
++    await prohibido('DELETE', '/api/clientes/1', CONDUCTOR);
++  });
++  await test('no puede borrar registros ni importar quincenas', async () => {
++    await prohibido('DELETE', '/api/registros/1', CONDUCTOR);
++    await prohibido('POST', '/api/registros/importar', CONDUCTOR, { registros: [] });
++  });
++
++  console.log('\n▸ El conductor SÍ alcanza lo que necesita para reportar');
++  await test('lee su perfil, la flota y los clientes', async () => {
++    await permitido('GET', '/api/auth/me', CONDUCTOR);
++    await permitido('GET', '/api/vehicles', CONDUCTOR);
++    await permitido('GET', '/api/clientes', CONDUCTOR);
++  });
++  await test('consulta y crea registros diarios', async () => {
++    await permitido('GET', '/api/registros', CONDUCTOR);
++    await permitido('GET', '/api/registros/ultimo', CONDUCTOR);
++  });
++  await test('puede cambiar su propia contraseña', async () => {
++    await permitido('POST', '/api/auth/cambiar-password', CONDUCTOR, { passwordActual: 'a', passwordNueva: 'b' });
++  });
++
++  console.log('\n▸ El admin pasa el control de acceso en todo');
++  await test('ningún módulo le responde 401 ni 403', async () => {
++    for (const r of ['/api/stats/dashboard', '/api/pagos', '/api/usuarios',
++                     '/api/mantenimiento', '/api/anticipos', '/api/vehicles',
++                     '/api/clientes', '/api/registros']) {
++      await permitido('GET', r, ADMIN);
++    }
++  });
++
++  await new Promise(r => servidor.close(r));
++  console.log(`\n${fallidas === 0 ? '✅' : '❌'} ${pasadas} pruebas pasaron, ${fallidas} fallaron.\n`);
++  process.exit(fallidas === 0 ? 0 : 1);
++})();
+diff --git a/backend/test/permisos.test.js b/backend/test/permisos.test.js
+new file mode 100644
+index 0000000..7e3e7d4
+--- /dev/null
++++ b/backend/test/permisos.test.js
+@@ -0,0 +1,254 @@
++/**
++ * Pruebas de la matriz de permisos por rol.
++ * Ejecutar:  node test/permisos.test.js
++ *
++ * Dos capas:
++ *   1. Las reglas puras de utils/permisos.js (qué puede hacer cada rol).
++ *   2. Una auditoría de las rutas: verifica que cada endpoint declare el
++ *      guard esperado. Si alguien agrega mañana una ruta sin protección,
++ *      esta prueba falla.
++ */
++const assert = require('assert');
++const fs = require('fs');
++const path = require('path');
++
++const {
++  hoyLocal,
++  puedeEditarRegistro,
++  fechaPermitida,
++  sanearEntradaRegistro,
++  vistaRegistroSegunRol,
++  DIAS_ATRAS_PERMITIDOS
++} = require('../src/utils/permisos');
++
++let pasadas = 0;
++let fallidas = 0;
++
++function test(nombre, fn) {
++  try {
++    fn();
++    pasadas++;
++    console.log('  ✓', nombre);
++  } catch (e) {
++    fallidas++;
++    console.log('  ✗', nombre);
++    console.log('     ', e.message);
++  }
++}
++
++// ── Actores de prueba ─────────────────────────────────────────
++const ADMIN = { id: 'admin1', rol: 'admin' };
++const CONDUCTOR = { id: 'cond1', rol: 'conductor' };
++const OTRO_CONDUCTOR = { id: 'cond2', rol: 'conductor' };
++
++// Un jueves 30-jul-2026, 10:00 en Bogotá (= 15:00 UTC).
++const AHORA = Date.parse('2026-07-30T15:00:00Z');
++const dia = (iso) => new Date(iso + 'T00:00:00.000Z');
++
++const registro = ({ creadoPor = CONDUCTOR.id, fecha = '2026-07-30', createdAt = '2026-07-30T14:00:00Z' } = {}) => ({
++  _id: 'reg1',
++  creadoPor,
++  fecha: dia(fecha),
++  createdAt: new Date(createdAt),
++  totalIngresos: 250000,
++  totalEgresos: 90000,
++  utilidadNeta: 160000,
++  pagoConductor: 70000,
++  kmDia: 180
++});
++
++console.log('\n▸ Zona horaria');
++
++test('hoyLocal usa la fecha de Colombia, no la UTC', () => {
++  // 31-jul 02:00 UTC = 30-jul 21:00 en Bogotá → todavía es día 30.
++  assert.strictEqual(hoyLocal(Date.parse('2026-07-31T02:00:00Z')), '2026-07-30');
++  // 30-jul 04:00 UTC = 29-jul 23:00 en Bogotá → todavía es día 29.
++  assert.strictEqual(hoyLocal(Date.parse('2026-07-30T04:00:00Z')), '2026-07-29');
++});
++
++console.log('\n▸ Edición de registros');
++
++test('el admin edita cualquier registro, sin importar antigüedad ni autor', () => {
++  const viejo = registro({ creadoPor: CONDUCTOR.id, fecha: '2026-06-01', createdAt: '2026-06-01T20:00:00Z' });
++  assert.strictEqual(puedeEditarRegistro(ADMIN, viejo, AHORA).ok, true);
++});
++
++test('el conductor edita su propio registro del día', () => {
++  assert.strictEqual(puedeEditarRegistro(CONDUCTOR, registro(), AHORA).ok, true);
++});
++
++test('el conductor NO puede editar el registro de otro conductor', () => {
++  const ajeno = registro({ creadoPor: OTRO_CONDUCTOR.id });
++  const r = puedeEditarRegistro(CONDUCTOR, ajeno, AHORA);
++  assert.strictEqual(r.ok, false);
++  assert.match(r.message, /tú capturaste/);
++});
++
++test('el conductor NO puede editar un registro de hace días', () => {
++  const viejo = registro({ fecha: '2026-07-27', createdAt: '2026-07-27T20:00:00Z' });
++  const r = puedeEditarRegistro(CONDUCTOR, viejo, AHORA);
++  assert.strictEqual(r.ok, false);
++  assert.match(r.message, /administrador/);
++});
++
++test('el turno que cierra después de medianoche sigue siendo editable (gracia de 6h)', () => {
++  // Son las 00:00 del 30 en Bogotá; capturó el registro del 29 hace 2 horas.
++  const medianoche = Date.parse('2026-07-30T05:00:00Z');
++  const anoche = registro({ fecha: '2026-07-29', createdAt: '2026-07-30T03:00:00Z' });
++  assert.strictEqual(puedeEditarRegistro(CONDUCTOR, anoche, medianoche).ok, true);
++});
++
++test('pasada la gracia, el registro de ayer queda cerrado', () => {
++  const anoche = registro({ fecha: '2026-07-29', createdAt: '2026-07-29T22:00:00Z' });
++  assert.strictEqual(puedeEditarRegistro(CONDUCTOR, anoche, AHORA).ok, false);
++});
++
++console.log('\n▸ Fechas permitidas al capturar');
++
++test('el conductor no puede registrar días futuros', () => {
++  assert.match(fechaPermitida(CONDUCTOR, dia('2026-07-31'), AHORA), /futuros/);
++});
++
++test('el conductor sí puede registrar días recientes', () => {
++  assert.strictEqual(fechaPermitida(CONDUCTOR, dia('2026-07-30'), AHORA), null);
++  assert.strictEqual(fechaPermitida(CONDUCTOR, dia('2026-07-27'), AHORA), null);
++});
++
++test(`el conductor no puede registrar más de ${DIAS_ATRAS_PERMITIDOS} días atrás`, () => {
++  assert.strictEqual(fechaPermitida(CONDUCTOR, dia('2026-07-23'), AHORA), null); // 7 días justos
++  assert.match(fechaPermitida(CONDUCTOR, dia('2026-07-22'), AHORA), /días hacia atrás/); // 8 días
++});
++
++test('el admin puede registrar cualquier fecha', () => {
++  assert.strictEqual(fechaPermitida(ADMIN, dia('2025-01-15'), AHORA), null);
++  assert.strictEqual(fechaPermitida(ADMIN, dia('2027-12-31'), AHORA), null);
++});
++
++test('una fecha inválida se rechaza', () => {
++  assert.match(fechaPermitida(CONDUCTOR, 'no-es-fecha', AHORA), /no es válida/);
++});
++
++console.log('\n▸ Saneo del cuerpo de la petición');
++
++test('el conductor no puede fijarse su propio pago', () => {
++  const limpio = sanearEntradaRegistro(CONDUCTOR, { combustible: 50000, pagoConductor: 999999 });
++  assert.strictEqual(limpio.pagoConductor, undefined);
++  assert.strictEqual(limpio.combustible, 50000);
++});
++
++test('el admin sí puede fijar el pago al conductor', () => {
++  const limpio = sanearEntradaRegistro(ADMIN, { pagoConductor: 800000 });
++  assert.strictEqual(limpio.pagoConductor, 800000);
++});
++
++test('nadie puede falsificar la trazabilidad ni los totales calculados', () => {
++  const intento = {
++    creadoPor: 'otro-usuario', modificadoPor: 'otro-usuario',
++    totalIngresos: 1, totalEgresos: 1, utilidadNeta: 99999999, kmDia: 5
++  };
++  for (const actor of [ADMIN, CONDUCTOR]) {
++    const limpio = sanearEntradaRegistro(actor, intento);
++    assert.strictEqual(limpio.creadoPor, undefined);
++    assert.strictEqual(limpio.modificadoPor, undefined);
++    assert.strictEqual(limpio.utilidadNeta, undefined);
++    assert.strictEqual(limpio.totalIngresos, undefined);
++    assert.strictEqual(limpio.kmDia, undefined);
++  }
++});
++
++console.log('\n▸ Qué devuelve la API según el rol');
++
++test('el conductor no recibe la utilidad ni el pago al conductor', () => {
++  const vista = vistaRegistroSegunRol(CONDUCTOR, registro());
++  assert.strictEqual(vista.utilidadNeta, undefined);
++  assert.strictEqual(vista.pagoConductor, undefined);
++  // Pero sí ve lo que él mismo capturó.
++  assert.strictEqual(vista.totalIngresos, 250000);
++  assert.strictEqual(vista.totalEgresos, 90000);
++});
++
++test('el admin recibe el registro completo', () => {
++  const vista = vistaRegistroSegunRol(ADMIN, registro());
++  assert.strictEqual(vista.utilidadNeta, 160000);
++  assert.strictEqual(vista.pagoConductor, 70000);
++});
++
++// ── Auditoría de las rutas ────────────────────────────────────
++console.log('\n▸ Auditoría de guards en las rutas');
++
++const DIR_RUTAS = path.join(__dirname, '..', 'src', 'routes');
++
++// Guard esperado por endpoint. 'admin' = solo administrador;
++// 'auth' = cualquier usuario autenticado (el control fino va dentro).
++const ESPERADO = {
++  'auth.js': {
++    'POST /login': 'publico',
++    'POST /setup': 'publico',
++    'GET /me': 'auth',
++    'POST /cambiar-password': 'auth'
++  },
++  'usuarios.js': '*admin',            // router.use(auth.soloAdmin) en todo el archivo
++  'stats.js': { 'GET /dashboard': 'admin', 'GET /historico': 'admin' },
++  'pagos.js': {
++    'GET /': 'admin', 'GET /:id': 'admin', 'POST /previsualizar': 'admin',
++    'POST /generar': 'admin', 'POST /': 'admin', 'PUT /:id': 'admin', 'DELETE /:id': 'admin'
++  },
++  'anticipos.js': {
++    'GET /': 'admin', 'POST /': 'admin', 'POST /:id/aplicar': 'admin', 'DELETE /:id': 'admin'
++  },
++  'mantenimiento.js': {
++    'GET /': 'admin', 'POST /': 'admin', 'PUT /:id': 'admin', 'DELETE /:id': 'admin'
++  },
++  'vehicles.js': {
++    // El conductor necesita la lista para elegir sobre qué carro reporta.
++    'GET /': 'auth', 'GET /:id': 'auth',
++    'POST /': 'admin', 'PUT /:id': 'admin', 'DELETE /:id': 'admin'
++  },
++  'clientes.js': {
++    // El conductor necesita los clientes para desglosar los ingresos del día.
++    'GET /': 'auth',
++    'GET /:id/resumen': 'admin', 'POST /': 'admin', 'PUT /:id': 'admin', 'DELETE /:id': 'admin'
++  },
++  'registros.js': {
++    'GET /ultimo': 'auth', 'GET /': 'auth', 'GET /:id': 'auth', 'POST /': 'auth',
++    'PUT /:id': 'auth',            // dentro valida autoría y ventana de edición
++    'POST /importar': 'admin', 'DELETE /:id': 'admin'
++  }
++};
++
++function guardsDeArchivo(archivo) {
++  const src = fs.readFileSync(path.join(DIR_RUTAS, archivo), 'utf8');
++  if (/router\.use\(auth\.soloAdmin\)/.test(src)) return '*admin';
++
++  const encontrados = {};
++  const re = /router\.(get|post|put|delete)\(\s*'([^']+)'\s*,\s*([A-Za-z0-9_.]+)/g;
++  let m;
++  while ((m = re.exec(src)) !== null) {
++    const [, verbo, ruta, guard] = m;
++    encontrados[`${verbo.toUpperCase()} ${ruta}`] =
++      guard === 'auth.soloAdmin' ? 'admin' : guard === 'auth' ? 'auth' : guard;
++  }
++  // Rutas declaradas sin guard alguno (ej. login) se marcan aparte.
++  const rePublica = /router\.(get|post|put|delete)\(\s*'([^']+)'\s*,\s*async/g;
++  while ((m = rePublica.exec(src)) !== null) {
++    encontrados[`${m[1].toUpperCase()} ${m[2]}`] = 'publico';
++  }
++  return encontrados;
++}
++
++for (const [archivo, esperado] of Object.entries(ESPERADO)) {
++  test(`${archivo}: los guards son los esperados`, () => {
++    const real = guardsDeArchivo(archivo);
++    assert.deepStrictEqual(real, esperado);
++  });
++}
++
++test('ninguna ruta protegida quedó sin guard por descuido', () => {
++  const archivos = fs.readdirSync(DIR_RUTAS).filter(f => f.endsWith('.js'));
++  const sinCubrir = archivos.filter(f => !Object.hasOwn(ESPERADO, f));
++  assert.deepStrictEqual(sinCubrir, [],
++    `Hay archivos de rutas sin auditar en esta prueba: ${sinCubrir.join(', ')}`);
++});
++
++console.log(`\n${fallidas === 0 ? '✅' : '❌'} ${pasadas} pruebas pasaron, ${fallidas} fallaron.\n`);
++process.exit(fallidas === 0 ? 0 : 1);
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index 4c9b64b..f5ef363 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -11,9 +11,12 @@ import Estadisticas from './pages/Estadisticas';
+ import Mantenimiento from './pages/Mantenimiento';
+ import Vehiculos from './pages/Vehiculos';
+ import Clientes from './pages/Clientes';
++import Usuarios from './pages/Usuarios';
++import MiCuenta from './pages/MiCuenta';
+ import { useIsMobile } from './hooks/useIsMobile';
+ 
+-const BOTTOM_NAV = [
++// Navegación inferior (móvil) según el rol.
++const BOTTOM_NAV_ADMIN = [
+   { path: '/dashboard',      label: 'Dashboard',  icon: '📊' },
+   { path: '/registro-diario',label: 'Registro',   icon: '📝' },
+   { path: '/pagos',          label: 'Pagos',      icon: '💰' },
+@@ -21,6 +24,15 @@ const BOTTOM_NAV = [
+   { path: '/mantenimiento',  label: 'Mantto',     icon: '🔧' },
+ ];
+ 
++// El conductor solo reporta: su formulario, su historial y su cuenta.
++const BOTTOM_NAV_CONDUCTOR = [
++  { path: '/registro-diario', label: 'Registrar', icon: '📝' },
++  { path: '/mi-cuenta',       label: 'Mi cuenta', icon: '👤' },
++];
++
++// Ruta de inicio de cada rol.
++const INICIO_POR_ROL = { admin: '/dashboard', conductor: '/registro-diario' };
++
+ function MobileTopBar({ onMenuClick }) {
+   return (
+     <div
+@@ -50,6 +62,8 @@ function MobileTopBar({ onMenuClick }) {
+ }
+ 
+ function MobileBottomNav() {
++  const { esConductor } = useAuth();
++  const items = esConductor ? BOTTOM_NAV_CONDUCTOR : BOTTOM_NAV_ADMIN;
+   return (
+     <div
+       className="mobile-bottom-nav"
+@@ -59,7 +73,7 @@ function MobileBottomNav() {
+         display: 'flex', zIndex: 150,
+       }}
+     >
+-      {BOTTOM_NAV.map(item => (
++      {items.map(item => (
+         <NavLink
+           key={item.path}
+           to={item.path}
+@@ -142,21 +156,43 @@ function ProtectedLayout({ children }) {
+   );
+ }
+ 
++/**
++ * Envuelve una página que solo puede ver el administrador. Si entra un
++ * conductor (escribiendo la URL a mano, por ejemplo) se le devuelve a su
++ * pantalla de trabajo en vez de mostrarle un error.
++ *
++ * Esto es solo la capa visual: el backend rechaza igual la petición con 403
++ * aunque alguien manipule el frontend.
++ */
++function SoloAdmin({ children }) {
++  const { esAdmin } = useAuth();
++  if (!esAdmin) return <Navigate to="/registro-diario" replace />;
++  return children;
++}
++
+ function AppRoutes() {
+-  const { user } = useAuth();
++  const { user, rol } = useAuth();
++  const inicio = INICIO_POR_ROL[rol] || '/registro-diario';
+ 
+   return (
+     <Routes>
+-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+-      <Route path="/dashboard" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
++      <Route path="/login" element={user ? <Navigate to={inicio} replace /> : <Login />} />
++
++      {/* Compartidas: el conductor entra aquí a reportar */}
+       <Route path="/registro-diario" element={<ProtectedLayout><RegistroDiario /></ProtectedLayout>} />
+-      <Route path="/pagos" element={<ProtectedLayout><Pagos /></ProtectedLayout>} />
+-      <Route path="/estadisticas" element={<ProtectedLayout><Estadisticas /></ProtectedLayout>} />
+-      <Route path="/proyecciones" element={<ProtectedLayout><Estadisticas /></ProtectedLayout>} />
+-      <Route path="/mantenimiento" element={<ProtectedLayout><Mantenimiento /></ProtectedLayout>} />
+-      <Route path="/vehiculos" element={<ProtectedLayout><Vehiculos /></ProtectedLayout>} />
+-      <Route path="/clientes" element={<ProtectedLayout><Clientes /></ProtectedLayout>} />
+-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
++      <Route path="/mi-cuenta" element={<ProtectedLayout><MiCuenta /></ProtectedLayout>} />
++
++      {/* Exclusivas del administrador */}
++      <Route path="/dashboard" element={<ProtectedLayout><SoloAdmin><Dashboard /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/pagos" element={<ProtectedLayout><SoloAdmin><Pagos /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/estadisticas" element={<ProtectedLayout><SoloAdmin><Estadisticas /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/proyecciones" element={<ProtectedLayout><SoloAdmin><Estadisticas /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/mantenimiento" element={<ProtectedLayout><SoloAdmin><Mantenimiento /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/vehiculos" element={<ProtectedLayout><SoloAdmin><Vehiculos /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/clientes" element={<ProtectedLayout><SoloAdmin><Clientes /></SoloAdmin></ProtectedLayout>} />
++      <Route path="/usuarios" element={<ProtectedLayout><SoloAdmin><Usuarios /></SoloAdmin></ProtectedLayout>} />
++
++      <Route path="*" element={<Navigate to={inicio} replace />} />
+     </Routes>
+   );
+ }
+diff --git a/frontend/src/components/Sidebar.jsx b/frontend/src/components/Sidebar.jsx
+index dcdd0f6..73b8d87 100644
+--- a/frontend/src/components/Sidebar.jsx
++++ b/frontend/src/components/Sidebar.jsx
+@@ -3,19 +3,22 @@ import { NavLink, useNavigate } from 'react-router-dom';
+ import { useAuth } from '../context/AuthContext';
+ import { useVehicles } from '../context/VehicleContext';
+ 
++// `roles` indica quién ve cada opción. Sin `roles` = visible para todos.
+ const NAV_ITEMS = [
+-  { path: '/dashboard', label: 'Dashboard' },
++  { path: '/dashboard', label: 'Dashboard', roles: ['admin'] },
+   { path: '/registro-diario', label: 'Registro Diario' },
+-  { path: '/pagos', label: 'Pagos y Liquidación' },
+-  { path: '/estadisticas', label: 'Estadísticas' },
+-  { path: '/proyecciones', label: 'Proyecciones' },
+-  { path: '/mantenimiento', label: 'Mantenimiento' },
+-  { path: '/clientes', label: 'Clientes' },
+-  { path: '/vehiculos', label: 'Vehículos' },
++  { path: '/pagos', label: 'Pagos y Liquidación', roles: ['admin'] },
++  { path: '/estadisticas', label: 'Estadísticas', roles: ['admin'] },
++  { path: '/proyecciones', label: 'Proyecciones', roles: ['admin'] },
++  { path: '/mantenimiento', label: 'Mantenimiento', roles: ['admin'] },
++  { path: '/clientes', label: 'Clientes', roles: ['admin'] },
++  { path: '/vehiculos', label: 'Vehículos', roles: ['admin'] },
++  { path: '/usuarios', label: 'Usuarios y Accesos', roles: ['admin'] },
++  { path: '/mi-cuenta', label: 'Mi cuenta' },
+ ];
+ 
+ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
+-  const { user, logout } = useAuth();
++  const { user, logout, rol, esConductor } = useAuth();
+   const { selectedVehicle, vehicles, setSelectedVehicle } = useVehicles();
+   const navigate = useNavigate();
+ 
+@@ -135,12 +138,12 @@ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
+         fontSize: '10.5px', letterSpacing: '0.14em',
+         textTransform: 'uppercase', color: '#5B6672', marginBottom: '14px',
+       }}>
+-        Contabilidad
++        {esConductor ? 'Mi operación' : 'Contabilidad'}
+       </div>
+ 
+       {/* Navigation */}
+       <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '32px' }}>
+-        {NAV_ITEMS.map(item => (
++        {NAV_ITEMS.filter(item => !item.roles || item.roles.includes(rol)).map(item => (
+           <NavLink
+             key={item.path}
+             to={item.path}
+@@ -202,6 +205,18 @@ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
+           <span style={{ fontSize: '16px' }}>↩</span>
+           Cerrar sesión · {user?.nombre?.split(' ')[0]}
+         </button>
++        {/* Distintivo de rol: deja claro con qué permisos se está trabajando */}
++        <div style={{
++          marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px',
++          fontSize: '10.5px', letterSpacing: '0.12em', textTransform: 'uppercase',
++          color: esConductor ? '#8FD9B0' : '#C5C6C7',
++        }}>
++          <span style={{
++            width: '6px', height: '6px', borderRadius: '50%',
++            background: esConductor ? '#8FD9B0' : '#C5C6C7', flexShrink: 0,
++          }} />
++          {esConductor ? 'Conductor' : 'Administrador'}
++        </div>
+       </div>
+     </aside>
+   );
+diff --git a/frontend/src/context/AuthContext.jsx b/frontend/src/context/AuthContext.jsx
+index 4e72e0b..91d56a0 100644
+--- a/frontend/src/context/AuthContext.jsx
++++ b/frontend/src/context/AuthContext.jsx
+@@ -11,11 +11,16 @@ export function AuthProvider({ children }) {
+   const [loading, setLoading] = useState(true);
+ 
+   useEffect(() => {
+-    // Verify token on mount
++    // Se revalida el token contra el servidor en cada carga. Esto también
++    // refresca el rol: si el admin cambió los permisos de alguien, aplica
++    // sin esperar a que caduque la sesión.
+     const token = localStorage.getItem('logal_token');
+     if (token) {
+       api.get('/auth/me')
+-        .then(res => setUser(res.data))
++        .then(res => {
++          setUser(res.data);
++          localStorage.setItem('logal_user', JSON.stringify(res.data));
++        })
+         .catch(() => {
+           localStorage.removeItem('logal_token');
+           localStorage.removeItem('logal_user');
+@@ -41,8 +46,24 @@ export function AuthProvider({ children }) {
+     setUser(null);
+   };
+ 
++  const cambiarPassword = async (passwordActual, passwordNueva) => {
++    const res = await api.post('/auth/cambiar-password', { passwordActual, passwordNueva });
++    if (res.data.token) localStorage.setItem('logal_token', res.data.token);
++    return res.data;
++  };
++
++  // El rol es la única fuente de verdad para la interfaz. Ojo: esto solo
++  // controla lo que se muestra; quien manda de verdad es el backend, que
++  // valida el rol en cada endpoint.
++  const rol = user?.rol || null;
++  const esAdmin = rol === 'admin';
++  const esConductor = rol === 'conductor';
++
+   return (
+-    <AuthContext.Provider value={{ user, login, logout, loading }}>
++    <AuthContext.Provider value={{
++      user, rol, esAdmin, esConductor,
++      login, logout, cambiarPassword, loading
++    }}>
+       {children}
+     </AuthContext.Provider>
+   );
+diff --git a/frontend/src/pages/MiCuenta.jsx b/frontend/src/pages/MiCuenta.jsx
+new file mode 100644
+index 0000000..c3f37e7
+--- /dev/null
++++ b/frontend/src/pages/MiCuenta.jsx
+@@ -0,0 +1,127 @@
++import React, { useState } from 'react';
++import { useAuth } from '../context/AuthContext';
++import { useIsMobile } from '../hooks/useIsMobile';
++
++/**
++ * Página disponible para cualquier usuario autenticado: ver su perfil y
++ * cambiar su propia contraseña. Es la contraparte de la contraseña temporal
++ * que entrega el administrador al crear una cuenta.
++ */
++export default function MiCuenta() {
++  const { user, esAdmin, cambiarPassword, logout } = useAuth();
++  const isMobile = useIsMobile();
++
++  const [form, setForm] = useState({ actual: '', nueva: '', confirmar: '' });
++  const [estado, setEstado] = useState({ tipo: null, mensaje: '' });
++  const [guardando, setGuardando] = useState(false);
++
++  const enviar = async (e) => {
++    e.preventDefault();
++    setEstado({ tipo: null, mensaje: '' });
++
++    if (form.nueva !== form.confirmar) {
++      return setEstado({ tipo: 'error', mensaje: 'La nueva contraseña y su confirmación no coinciden.' });
++    }
++    if (form.nueva === form.actual) {
++      return setEstado({ tipo: 'error', mensaje: 'La nueva contraseña debe ser distinta a la actual.' });
++    }
++
++    setGuardando(true);
++    try {
++      await cambiarPassword(form.actual, form.nueva);
++      setForm({ actual: '', nueva: '', confirmar: '' });
++      setEstado({ tipo: 'ok', mensaje: 'Contraseña actualizada. Úsala la próxima vez que inicies sesión.' });
++    } catch (err) {
++      setEstado({ tipo: 'error', mensaje: err.response?.data?.message || 'No se pudo cambiar la contraseña.' });
++    } finally {
++      setGuardando(false);
++    }
++  };
++
++  return (
++    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '84px 16px 90px' : '36px 44px 60px' }}>
++      <div style={{ marginBottom: '24px' }}>
++        <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
++          Sesión
++        </div>
++        <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
++          Mi cuenta
++        </h1>
++      </div>
++
++      <div style={{ display: 'grid', gap: '20px', maxWidth: '520px' }}>
++        {/* Perfil */}
++        <div style={cardStyle}>
++          <Fila etiqueta="Nombre" valor={user?.nombre} />
++          <Fila etiqueta="Usuario" valor={user?.username} mono />
++          <Fila
++            etiqueta="Rol"
++            valor={esAdmin ? 'Administrador · acceso total' : 'Conductor · reporte de ingresos y egresos'}
++          />
++        </div>
++
++        {/* Cambio de contraseña */}
++        <form onSubmit={enviar} style={cardStyle}>
++          <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#FFFFFF', marginTop: 0, marginBottom: '18px' }}>
++            Cambiar mi contraseña
++          </h2>
++
++          <div style={{ marginBottom: '14px' }}>
++            <Label>Contraseña actual</Label>
++            <input type="password" required autoComplete="current-password" value={form.actual}
++              onChange={e => setForm({ ...form, actual: e.target.value })} style={inputStyle} />
++          </div>
++
++          <div style={{ marginBottom: '14px' }}>
++            <Label>Nueva contraseña</Label>
++            <input type="password" required minLength={8} autoComplete="new-password" value={form.nueva}
++              onChange={e => setForm({ ...form, nueva: e.target.value })} style={inputStyle} />
++            <div style={{ fontSize: '12px', color: '#8B98A3', marginTop: '6px' }}>
++              Mínimo 8 caracteres, con letras y números.
++            </div>
++          </div>
++
++          <div style={{ marginBottom: '14px' }}>
++            <Label>Confirmar nueva contraseña</Label>
++            <input type="password" required minLength={8} autoComplete="new-password" value={form.confirmar}
++              onChange={e => setForm({ ...form, confirmar: e.target.value })} style={inputStyle} />
++          </div>
++
++          {estado.tipo && (
++            <div style={{
++              fontSize: '13px', marginBottom: '14px', padding: '10px 14px', borderRadius: '8px',
++              color: estado.tipo === 'ok' ? '#8FD9B0' : '#f87171',
++              background: estado.tipo === 'ok' ? 'rgba(143,217,176,0.08)' : 'rgba(248,113,113,0.08)',
++            }}>
++              {estado.mensaje}
++            </div>
++          )}
++
++          <button type="submit" disabled={guardando} style={btnPrimary}>
++            {guardando ? 'Guardando...' : 'Actualizar contraseña'}
++          </button>
++        </form>
++
++        <button onClick={logout} style={btnSecondary}>Cerrar sesión</button>
++      </div>
++    </main>
++  );
++}
++
++const Fila = ({ etiqueta, valor, mono }) => (
++  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '16px', padding: '9px 0', borderBottom: '1px solid rgba(197,198,199,0.07)' }}>
++    <span style={{ fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#7C8994' }}>{etiqueta}</span>
++    <span style={{ fontSize: '14px', color: '#FFFFFF', fontFamily: mono ? 'monospace' : 'inherit', textAlign: 'right' }}>{valor || '—'}</span>
++  </div>
++);
++
++const Label = ({ children }) => (
++  <label style={{ display: 'block', fontSize: '11.5px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#8B98A3', marginBottom: '6px' }}>
++    {children}
++  </label>
++);
++
++const inputStyle = { width: '100%', background: '#0B0C10', border: '1px solid rgba(197,198,199,0.15)', borderRadius: '8px', color: '#FFFFFF', padding: '10px 14px', fontSize: '14px', outline: 'none', fontFamily: 'inherit' };
++const btnPrimary = { padding: '10px 20px', background: '#C5C6C7', color: '#0B0C10', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' };
++const btnSecondary = { padding: '10px 16px', background: '#1F2833', color: '#C5C6C7', border: '1px solid rgba(197,198,199,0.15)', borderRadius: '9px', fontSize: '13px', cursor: 'pointer' };
++const cardStyle = { background: '#151920', border: '1px solid rgba(197,198,199,0.1)', borderRadius: '14px', padding: '22px' };
+diff --git a/frontend/src/pages/RegistroDiario.jsx b/frontend/src/pages/RegistroDiario.jsx
+index 7cd44eb..5d724cc 100644
+--- a/frontend/src/pages/RegistroDiario.jsx
++++ b/frontend/src/pages/RegistroDiario.jsx
+@@ -1,11 +1,25 @@
+ import React, { useState, useEffect } from 'react';
+ import api, { fmt, fmtDate } from '../utils/api';
+ import { useVehicles } from '../context/VehicleContext';
++import { useAuth } from '../context/AuthContext';
+ import { useIsMobile } from '../hooks/useIsMobile';
+ import { exportarRegistrosExcel, leerExcel, imprimirPDF } from '../utils/exportar';
+ 
+ const TIPOS_INGRESO = ['Empresarial', 'Ejecutivo', 'Aeropuerto', 'Turismo', 'Otro'];
+ 
++// Espejo de la regla del backend (backend/src/routes/registros.js): el
++// conductor corrige su registro mientras sea de hoy o lleve menos de 6 horas
++// de creado. Aquí solo se usa para no mostrar un botón que va a fallar.
++const HORAS_GRACIA_EDICION = 6;
++const hoyBogota = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
++
++function conductorPuedeEditar(r) {
++  if (!r) return false;
++  const esDeHoy = new Date(r.fecha).toISOString().slice(0, 10) === hoyBogota();
++  const horas = r.createdAt ? (Date.now() - new Date(r.createdAt).getTime()) / 3600000 : Infinity;
++  return esDeHoy || horas <= HORAS_GRACIA_EDICION;
++}
++
+ const emptyForm = () => ({
+   fecha: new Date().toISOString().split('T')[0],
+   conductor: '',
+@@ -83,6 +97,7 @@ function mapearFilaExcel(fila, vehiculo, clientes) {
+ 
+ export default function RegistroDiario() {
+   const { vehicles, selectedVehicle } = useVehicles();
++  const { esAdmin, esConductor } = useAuth();
+   const isMobile = useIsMobile();
+   const [registros, setRegistros] = useState([]);
+   const [total, setTotal] = useState(0);
+@@ -308,13 +323,20 @@ export default function RegistroDiario() {
+             Movimientos
+           </div>
+           <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
+-            Registro Diario
++            {esConductor ? 'Mis Registros' : 'Registro Diario'}
+           </h1>
++          {esConductor && (
++            <div style={{ fontSize: '13px', color: '#8B98A3', marginTop: '6px' }}>
++              Reporta los ingresos y egresos del día. Puedes corregir el registro de hoy;
++              después solo lo ajusta el administrador.
++            </div>
++          )}
+         </div>
+         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+-          <button onClick={() => setShowImport(true)} style={btnSecondary}>⭳ Importar Excel</button>
+-          <button onClick={exportarExcel} style={btnSecondary} disabled={!registros.length}>⭱ Excel</button>
+-          <button onClick={exportarPDF} style={btnSecondary} disabled={!registros.length}>🖶 PDF</button>
++          {/* Importar y exportar son herramientas de contabilidad: solo admin */}
++          {esAdmin && <button onClick={() => setShowImport(true)} style={btnSecondary}>⭳ Importar Excel</button>}
++          {esAdmin && <button onClick={exportarExcel} style={btnSecondary} disabled={!registros.length}>⭱ Excel</button>}
++          {esAdmin && <button onClick={exportarPDF} style={btnSecondary} disabled={!registros.length}>🖶 PDF</button>}
+           <button onClick={openNuevo} style={btnPrimary}>+ Nuevo Registro</button>
+         </div>
+       </div>
+@@ -468,14 +490,18 @@ export default function RegistroDiario() {
+                   <Input type="number" min="0" step="100" value={form.otros} onChange={e => setForm({ ...form, otros: e.target.value })} /></div>
+               </div>
+ 
+-              <SectionTitle>Kilometraje y pago al conductor</SectionTitle>
+-              <div style={grid3}>
++              <SectionTitle>{esAdmin ? 'Kilometraje y pago al conductor' : 'Kilometraje'}</SectionTitle>
++              <div style={esAdmin ? grid3 : grid2}>
+                 <div><Label>Km inicio</Label>
+                   <Input type="number" min="0" value={form.kmInicio} onChange={e => setForm({ ...form, kmInicio: e.target.value })} /></div>
+                 <div><Label>Km fin</Label>
+                   <Input type="number" min="0" value={form.kmFin} onChange={e => setForm({ ...form, kmFin: e.target.value })} /></div>
+-                <div><Label>Pago al conductor</Label>
+-                  <Input type="number" min="0" step="100" value={form.pagoConductor} onChange={e => setForm({ ...form, pagoConductor: e.target.value })} /></div>
++                {/* El pago al conductor lo decide la empresa: el backend ignora
++                    este campo si lo envía un conductor. */}
++                {esAdmin && (
++                  <div><Label>Pago al conductor</Label>
++                    <Input type="number" min="0" step="100" value={form.pagoConductor} onChange={e => setForm({ ...form, pagoConductor: e.target.value })} /></div>
++                )}
+               </div>
+               <div style={{ marginTop: '10px', padding: '8px 14px', background: '#0B0C10', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'space-between' }}>
+                 <span style={{ color: '#8B98A3' }}>Total Km del día:</span>
+@@ -508,10 +534,12 @@ export default function RegistroDiario() {
+                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B98A3', marginBottom: '4px' }}>
+                     <span>Total egresos:</span><span style={{ color: '#C5C6C7' }}>{fmt(totalEgresosForm)}</span>
+                   </div>
+-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderTop: '1px solid rgba(197,198,199,0.1)', paddingTop: '8px', marginTop: '8px' }}>
+-                    <span style={{ color: '#FFFFFF' }}>Saldo del día (utilidad):</span>
+-                    <span style={{ color: (totalIngresosForm - totalEgresosForm) >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(totalIngresosForm - totalEgresosForm)}</span>
+-                  </div>
++                  {esAdmin && (
++                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderTop: '1px solid rgba(197,198,199,0.1)', paddingTop: '8px', marginTop: '8px' }}>
++                      <span style={{ color: '#FFFFFF' }}>Saldo del día (utilidad):</span>
++                      <span style={{ color: (totalIngresosForm - totalEgresosForm) >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(totalIngresosForm - totalEgresosForm)}</span>
++                    </div>
++                  )}
+                 </div>
+               )}
+ 
+@@ -534,16 +562,19 @@ export default function RegistroDiario() {
+           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
+             <thead>
+               <tr style={{ borderBottom: '1px solid rgba(197,198,199,0.1)' }}>
+-                {['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', 'Utilidad', ''].map(h => (
+-                  <th key={h} style={thStyle}>{h}</th>
++                {(esAdmin
++                  ? ['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', 'Utilidad', '']
++                  : ['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', '']
++                ).map((h, i) => (
++                  <th key={`${h}-${i}`} style={thStyle}>{h}</th>
+                 ))}
+               </tr>
+             </thead>
+             <tbody>
+               {loading ? (
+-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
++                <tr><td colSpan={esAdmin ? 8 : 7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
+               ) : registros.length === 0 ? (
+-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>
++                <tr><td colSpan={esAdmin ? 8 : 7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>
+                   Sin registros. ¡Agrega el primero!
+                 </td></tr>
+               ) : registros.map(r => (
+@@ -556,10 +587,19 @@ export default function RegistroDiario() {
+                   </td>
+                   <td style={{ ...tdStyle, color: '#C5C6C7', fontWeight: 600 }}>{fmt(r.totalIngresos ?? r.ingresos?.valor)}</td>
+                   <td style={{ ...tdStyle, color: '#93A0AB' }}>{fmt(r.totalEgresos)}</td>
+-                  <td style={{ ...tdStyle, fontWeight: 600, color: r.utilidadNeta >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(r.utilidadNeta)}</td>
++                  {esAdmin && (
++                    <td style={{ ...tdStyle, fontWeight: 600, color: r.utilidadNeta >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(r.utilidadNeta)}</td>
++                  )}
+                   <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+-                    <button onClick={() => handleEdit(r)} style={iconBtn}>✏</button>
+-                    <button onClick={() => handleDelete(r._id)} style={{ ...iconBtn, color: '#f87171' }}>✕</button>
++                    {(esAdmin || conductorPuedeEditar(r)) ? (
++                      <button onClick={() => handleEdit(r)} style={iconBtn} title="Editar">✏</button>
++                    ) : (
++                      <span title="Cerrado: pídele el ajuste al administrador"
++                        style={{ color: '#5B6672', fontSize: '13px', padding: '0 6px' }}>🔒</span>
++                    )}
++                    {esAdmin && (
++                      <button onClick={() => handleDelete(r._id)} style={{ ...iconBtn, color: '#f87171' }} title="Eliminar">✕</button>
++                    )}
+                   </td>
+                 </tr>
+               ))}
+diff --git a/frontend/src/pages/Usuarios.jsx b/frontend/src/pages/Usuarios.jsx
+new file mode 100644
+index 0000000..cd95d77
+--- /dev/null
++++ b/frontend/src/pages/Usuarios.jsx
+@@ -0,0 +1,325 @@
++import React, { useState, useEffect } from 'react';
++import api, { fmtDate } from '../utils/api';
++import { useAuth } from '../context/AuthContext';
++import { useIsMobile } from '../hooks/useIsMobile';
++
++const emptyForm = () => ({ username: '', nombre: '', rol: 'conductor', password: '' });
++
++const DESCRIPCION_ROL = {
++  admin: 'Acceso total: dashboard, estadísticas, liquidaciones, clientes, vehículos y usuarios.',
++  conductor: 'Solo reporta ingresos y egresos del día y ve su propio historial.'
++};
++
++export default function Usuarios() {
++  const { user } = useAuth();
++  const isMobile = useIsMobile();
++
++  const [usuarios, setUsuarios] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [showForm, setShowForm] = useState(false);
++  const [form, setForm] = useState(emptyForm());
++  const [editId, setEditId] = useState(null);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState('');
++  // Contraseña temporal recién generada — se muestra UNA sola vez.
++  const [credencial, setCredencial] = useState(null);
++
++  const cargar = async () => {
++    setLoading(true);
++    try {
++      const res = await api.get('/usuarios');
++      setUsuarios(res.data.usuarios || []);
++    } catch (err) {
++      setError(err.response?.data?.message || 'No se pudo cargar la lista de usuarios.');
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  useEffect(() => { cargar(); }, []);
++
++  const abrirNuevo = () => {
++    setForm(emptyForm());
++    setEditId(null);
++    setError('');
++    setShowForm(true);
++  };
++
++  const abrirEdicion = (u) => {
++    setForm({ username: u.username, nombre: u.nombre, rol: u.rol, password: '' });
++    setEditId(u._id);
++    setError('');
++    setShowForm(true);
++  };
++
++  const guardar = async (e) => {
++    e.preventDefault();
++    setSaving(true);
++    setError('');
++    try {
++      if (editId) {
++        const res = await api.put(`/usuarios/${editId}`, {
++          nombre: form.nombre,
++          username: form.username,
++          rol: form.rol
++        });
++        setUsuarios(list => list.map(u => u._id === editId ? res.data.usuario : u));
++      } else {
++        const res = await api.post('/usuarios', {
++          username: form.username,
++          nombre: form.nombre,
++          rol: form.rol,
++          // Vacío = el servidor genera una contraseña temporal.
++          password: form.password || undefined
++        });
++        setUsuarios(list => [...list, res.data.usuario]);
++        if (res.data.passwordTemporal) {
++          setCredencial({ nombre: res.data.usuario.nombre, username: res.data.usuario.username, password: res.data.passwordTemporal });
++        }
++      }
++      setShowForm(false);
++      setEditId(null);
++      setForm(emptyForm());
++    } catch (err) {
++      setError(err.response?.data?.message || 'No se pudo guardar.');
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  const alternarActivo = async (u) => {
++    try {
++      const res = await api.put(`/usuarios/${u._id}`, { activo: !u.activo });
++      setUsuarios(list => list.map(x => x._id === u._id ? res.data.usuario : x));
++    } catch (err) {
++      alert(err.response?.data?.message || 'No se pudo cambiar el estado.');
++    }
++  };
++
++  const restablecerPassword = async (u) => {
++    const manual = prompt(
++      `Nueva contraseña para ${u.nombre}.\n\nDéjala vacía y presiona Aceptar para que el sistema genere una temporal.`,
++      ''
++    );
++    if (manual === null) return; // canceló
++    try {
++      const res = await api.put(`/usuarios/${u._id}/password`, { password: manual || undefined });
++      if (res.data.passwordTemporal) {
++        setCredencial({ nombre: u.nombre, username: u.username, password: res.data.passwordTemporal });
++      } else {
++        alert(res.data.message);
++      }
++    } catch (err) {
++      alert(err.response?.data?.message || 'No se pudo cambiar la contraseña.');
++    }
++  };
++
++  const eliminar = async (u) => {
++    if (!confirm(`¿Eliminar a ${u.nombre}? Los registros que capturó se conservan.`)) return;
++    try {
++      await api.delete(`/usuarios/${u._id}`);
++      setUsuarios(list => list.filter(x => x._id !== u._id));
++    } catch (err) {
++      alert(err.response?.data?.message || 'No se pudo eliminar.');
++    }
++  };
++
++  const admins = usuarios.filter(u => u.rol === 'admin').length;
++  const conductores = usuarios.filter(u => u.rol === 'conductor').length;
++
++  return (
++    <main style={{ flex: 1, minWidth: 0, padding: isMobile ? '84px 16px 90px' : '36px 44px 60px' }}>
++      {/* Encabezado */}
++      <div style={{
++        display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end',
++        flexDirection: isMobile ? 'column' : 'row',
++        justifyContent: 'space-between', marginBottom: '24px', gap: isMobile ? '12px' : '0',
++      }}>
++        <div>
++          <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#7C8994', marginBottom: '8px' }}>
++            Administración
++          </div>
++          <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
++            Usuarios y Accesos
++          </h1>
++          <div style={{ fontSize: '13px', color: '#8B98A3', marginTop: '6px' }}>
++            {admins} administrador{admins === 1 ? '' : 'es'} · {conductores} conductor{conductores === 1 ? '' : 'es'}
++          </div>
++        </div>
++        <button onClick={abrirNuevo} style={btnPrimary}>+ Nuevo Usuario</button>
++      </div>
++
++      {/* Contraseña temporal generada */}
++      {credencial && (
++        <div style={{
++          ...cardStyle, marginBottom: '20px',
++          borderColor: 'rgba(143,217,176,0.35)', background: 'rgba(143,217,176,0.06)',
++        }}>
++          <div style={{ fontSize: '13px', fontWeight: 700, color: '#8FD9B0', marginBottom: '10px' }}>
++            Credenciales de {credencial.nombre}
++          </div>
++          <div style={{ fontSize: '13px', color: '#C5C6C7', marginBottom: '4px' }}>
++            Usuario: <b style={{ fontFamily: 'monospace', fontSize: '15px' }}>{credencial.username}</b>
++          </div>
++          <div style={{ fontSize: '13px', color: '#C5C6C7' }}>
++            Contraseña: <b style={{ fontFamily: 'monospace', fontSize: '15px', letterSpacing: '0.05em' }}>{credencial.password}</b>
++          </div>
++          <div style={{ fontSize: '12px', color: '#e0b055', marginTop: '10px' }}>
++            Cópiala ahora y entrégasela en persona: no se vuelve a mostrar. Pídele que la cambie desde "Mi cuenta".
++          </div>
++          <button onClick={() => setCredencial(null)} style={{ ...btnSecondary, marginTop: '14px' }}>
++            Ya la copié
++          </button>
++        </div>
++      )}
++
++      {error && !showForm && (
++        <div style={{ ...cardStyle, marginBottom: '20px', borderColor: 'rgba(248,113,113,0.3)', color: '#f87171', fontSize: '13px' }}>
++          {error}
++        </div>
++      )}
++
++      {/* Formulario */}
++      {showForm && (
++        <div style={overlayStyle} onClick={e => e.target === e.currentTarget && setShowForm(false)}>
++          <form onSubmit={guardar} style={modalStyle}>
++            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#FFFFFF', marginTop: 0, marginBottom: '20px' }}>
++              {editId ? 'Editar usuario' : 'Nuevo usuario'}
++            </h2>
++
++            <div style={{ marginBottom: '14px' }}>
++              <Label>Nombre completo</Label>
++              <input required value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })}
++                style={inputStyle} placeholder="Ej. Carlos Ramírez" />
++            </div>
++
++            <div style={{ marginBottom: '14px' }}>
++              <Label>Usuario (para iniciar sesión)</Label>
++              <input required minLength={3} value={form.username}
++                onChange={e => setForm({ ...form, username: e.target.value.toLowerCase().replace(/\s/g, '') })}
++                style={inputStyle} placeholder="Ej. carlos" autoCapitalize="none" />
++            </div>
++
++            <div style={{ marginBottom: '14px' }}>
++              <Label>Rol</Label>
++              <select value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })} style={inputStyle}>
++                <option value="conductor" style={{ background: '#161920' }}>Conductor</option>
++                <option value="admin" style={{ background: '#161920' }}>Administrador</option>
++              </select>
++              <div style={{ fontSize: '12px', color: '#8B98A3', marginTop: '8px', lineHeight: 1.5 }}>
++                {DESCRIPCION_ROL[form.rol]}
++              </div>
++            </div>
++
++            {!editId && (
++              <div style={{ marginBottom: '14px' }}>
++                <Label>Contraseña (opcional)</Label>
++                <input type="text" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
++                  style={inputStyle} placeholder="Déjala vacía para generar una temporal" autoComplete="new-password" />
++                <div style={{ fontSize: '12px', color: '#8B98A3', marginTop: '8px' }}>
++                  Mínimo 8 caracteres, con letras y números.
++                </div>
++              </div>
++            )}
++
++            {error && (
++              <div style={{ fontSize: '13px', color: '#f87171', marginBottom: '14px' }}>{error}</div>
++            )}
++
++            <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
++              <button type="submit" disabled={saving} style={btnPrimary}>
++                {saving ? 'Guardando...' : editId ? 'Actualizar' : 'Crear usuario'}
++              </button>
++              <button type="button" onClick={() => { setShowForm(false); setError(''); }} style={btnSecondary}>
++                Cancelar
++              </button>
++            </div>
++          </form>
++        </div>
++      )}
++
++      {/* Lista */}
++      <div style={{ background: '#151920', border: '1px solid rgba(197,198,199,0.1)', borderRadius: '14px', overflow: 'hidden' }}>
++        <div style={{ overflowX: 'auto' }}>
++          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
++            <thead>
++              <tr style={{ borderBottom: '1px solid rgba(197,198,199,0.1)' }}>
++                {['Nombre', 'Usuario', 'Rol', 'Estado', 'Último acceso', ''].map((h, i) => (
++                  <th key={i} style={thStyle}>{h}</th>
++                ))}
++              </tr>
++            </thead>
++            <tbody>
++              {loading ? (
++                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
++              ) : usuarios.length === 0 ? (
++                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Sin usuarios.</td></tr>
++              ) : usuarios.map(u => {
++                const soyYo = u._id === (user?.id || user?._id);
++                return (
++                  <tr key={u._id} style={{ borderBottom: '1px solid rgba(197,198,199,0.06)' }}>
++                    <td style={{ ...tdStyle, color: '#FFFFFF', fontWeight: 600 }}>
++                      {u.nombre}
++                      {soyYo && <span style={{ marginLeft: '8px', fontSize: '11px', color: '#7C8994', fontWeight: 400 }}>(tú)</span>}
++                    </td>
++                    <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{u.username}</td>
++                    <td style={tdStyle}>
++                      <span style={{
++                        padding: '3px 9px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
++                        background: u.rol === 'admin' ? 'rgba(197,198,199,0.14)' : 'rgba(143,217,176,0.14)',
++                        color: u.rol === 'admin' ? '#C5C6C7' : '#8FD9B0',
++                      }}>
++                        {u.rol === 'admin' ? 'ADMIN' : 'CONDUCTOR'}
++                      </span>
++                    </td>
++                    <td style={tdStyle}>
++                      <span style={{ color: u.activo ? '#8FD9B0' : '#f87171', fontSize: '12.5px' }}>
++                        {u.activo ? '● Activo' : '○ Inactivo'}
++                      </span>
++                    </td>
++                    <td style={{ ...tdStyle, color: '#7C8994', fontSize: '12.5px' }}>
++                      {u.ultimoAcceso ? fmtDate(u.ultimoAcceso) : 'Nunca'}
++                    </td>
++                    <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
++                      <button onClick={() => abrirEdicion(u)} style={iconBtn} title="Editar">✏</button>
++                      <button onClick={() => restablecerPassword(u)} style={iconBtn} title="Restablecer contraseña">🔑</button>
++                      {!soyYo && (
++                        <button onClick={() => alternarActivo(u)} style={iconBtn} title={u.activo ? 'Desactivar' : 'Activar'}>
++                          {u.activo ? '⏸' : '▶'}
++                        </button>
++                      )}
++                      {!soyYo && (
++                        <button onClick={() => eliminar(u)} style={{ ...iconBtn, color: '#f87171' }} title="Eliminar">✕</button>
++                      )}
++                    </td>
++                  </tr>
++                );
++              })}
++            </tbody>
++          </table>
++        </div>
++      </div>
++
++      <div style={{ marginTop: '18px', fontSize: '12.5px', color: '#7C8994', lineHeight: 1.6, maxWidth: '640px' }}>
++        Desactivar una cuenta cierra su sesión de inmediato sin borrar nada: los registros que capturó
++        se conservan. Siempre debe quedar al menos un administrador activo.
++      </div>
++    </main>
++  );
++}
++
++const Label = ({ children }) => (
++  <label style={{ display: 'block', fontSize: '11.5px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#8B98A3', marginBottom: '6px' }}>
++    {children}
++  </label>
++);
++
++const inputStyle = { width: '100%', background: '#0B0C10', border: '1px solid rgba(197,198,199,0.15)', borderRadius: '8px', color: '#FFFFFF', padding: '10px 14px', fontSize: '14px', outline: 'none', fontFamily: 'inherit' };
++const btnPrimary = { padding: '10px 20px', background: '#C5C6C7', color: '#0B0C10', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' };
++const btnSecondary = { padding: '8px 16px', background: '#1F2833', color: '#C5C6C7', border: '1px solid rgba(197,198,199,0.15)', borderRadius: '9px', fontSize: '13px', cursor: 'pointer' };
++const iconBtn = { padding: '4px 8px', background: 'transparent', border: 'none', color: '#8B98A3', cursor: 'pointer', fontSize: '14px', borderRadius: '4px' };
++const cardStyle = { background: '#151920', border: '1px solid rgba(197,198,199,0.1)', borderRadius: '14px', padding: '20px' };
++const thStyle = { textAlign: 'left', padding: '13px 16px', fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase', color: '#7C8994', fontWeight: 600 };
++const tdStyle = { padding: '13px 16px', fontSize: '13.5px', color: '#C5C6C7' };
++const overlayStyle = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' };
++const modalStyle = { background: '#151920', border: '1px solid rgba(197,198,199,0.15)', borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' };
+-- 
+2.43.0
+

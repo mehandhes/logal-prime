@@ -4,7 +4,7 @@ const auth = require('../middleware/auth');
 const Mantenimiento = require('../models/Mantenimiento');
 
 // GET /api/mantenimiento
-router.get('/', auth, async (req, res) => {
+router.get('/', auth.soloAdmin, async (req, res) => {
   try {
     const { vehiculo, estado } = req.query;
     const filter = {};
@@ -21,7 +21,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // POST /api/mantenimiento
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.soloAdmin, async (req, res) => {
   try {
     const item = new Mantenimiento(req.body);
     await item.save();
@@ -32,7 +32,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // PUT /api/mantenimiento/:id
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const item = await Mantenimiento.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!item) return res.status(404).json({ message: 'Registro no encontrado.' });
@@ -43,7 +43,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/mantenimiento/:id
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const item = await Mantenimiento.findByIdAndDelete(req.params.id);
     if (!item) return res.status(404).json({ message: 'Registro no encontrado.' });

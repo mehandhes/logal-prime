@@ -11,15 +11,27 @@ import Estadisticas from './pages/Estadisticas';
 import Mantenimiento from './pages/Mantenimiento';
 import Vehiculos from './pages/Vehiculos';
 import Clientes from './pages/Clientes';
+import Usuarios from './pages/Usuarios';
+import MiCuenta from './pages/MiCuenta';
 import { useIsMobile } from './hooks/useIsMobile';
 
-const BOTTOM_NAV = [
+// Navegación inferior (móvil) según el rol.
+const BOTTOM_NAV_ADMIN = [
   { path: '/dashboard',      label: 'Dashboard',  icon: '📊' },
   { path: '/registro-diario',label: 'Registro',   icon: '📝' },
   { path: '/pagos',          label: 'Pagos',      icon: '💰' },
   { path: '/estadisticas',   label: 'Stats',      icon: '📈' },
   { path: '/mantenimiento',  label: 'Mantto',     icon: '🔧' },
 ];
+
+// El conductor solo reporta: su formulario, su historial y su cuenta.
+const BOTTOM_NAV_CONDUCTOR = [
+  { path: '/registro-diario', label: 'Registrar', icon: '📝' },
+  { path: '/mi-cuenta',       label: 'Mi cuenta', icon: '👤' },
+];
+
+// Ruta de inicio de cada rol.
+const INICIO_POR_ROL = { admin: '/dashboard', conductor: '/registro-diario' };
 
 function MobileTopBar({ onMenuClick }) {
   return (
@@ -50,6 +62,8 @@ function MobileTopBar({ onMenuClick }) {
 }
 
 function MobileBottomNav() {
+  const { esConductor } = useAuth();
+  const items = esConductor ? BOTTOM_NAV_CONDUCTOR : BOTTOM_NAV_ADMIN;
   return (
     <div
       className="mobile-bottom-nav"
@@ -59,7 +73,7 @@ function MobileBottomNav() {
         display: 'flex', zIndex: 150,
       }}
     >
-      {BOTTOM_NAV.map(item => (
+      {items.map(item => (
         <NavLink
           key={item.path}
           to={item.path}
@@ -142,21 +156,43 @@ function ProtectedLayout({ children }) {
   );
 }
 
+/**
+ * Envuelve una página que solo puede ver el administrador. Si entra un
+ * conductor (escribiendo la URL a mano, por ejemplo) se le devuelve a su
+ * pantalla de trabajo en vez de mostrarle un error.
+ *
+ * Esto es solo la capa visual: el backend rechaza igual la petición con 403
+ * aunque alguien manipule el frontend.
+ */
+function SoloAdmin({ children }) {
+  const { esAdmin } = useAuth();
+  if (!esAdmin) return <Navigate to="/registro-diario" replace />;
+  return children;
+}
+
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, rol } = useAuth();
+  const inicio = INICIO_POR_ROL[rol] || '/registro-diario';
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
-      <Route path="/dashboard" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
+      <Route path="/login" element={user ? <Navigate to={inicio} replace /> : <Login />} />
+
+      {/* Compartidas: el conductor entra aquí a reportar */}
       <Route path="/registro-diario" element={<ProtectedLayout><RegistroDiario /></ProtectedLayout>} />
-      <Route path="/pagos" element={<ProtectedLayout><Pagos /></ProtectedLayout>} />
-      <Route path="/estadisticas" element={<ProtectedLayout><Estadisticas /></ProtectedLayout>} />
-      <Route path="/proyecciones" element={<ProtectedLayout><Estadisticas /></ProtectedLayout>} />
-      <Route path="/mantenimiento" element={<ProtectedLayout><Mantenimiento /></ProtectedLayout>} />
-      <Route path="/vehiculos" element={<ProtectedLayout><Vehiculos /></ProtectedLayout>} />
-      <Route path="/clientes" element={<ProtectedLayout><Clientes /></ProtectedLayout>} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/mi-cuenta" element={<ProtectedLayout><MiCuenta /></ProtectedLayout>} />
+
+      {/* Exclusivas del administrador */}
+      <Route path="/dashboard" element={<ProtectedLayout><SoloAdmin><Dashboard /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/pagos" element={<ProtectedLayout><SoloAdmin><Pagos /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/estadisticas" element={<ProtectedLayout><SoloAdmin><Estadisticas /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/proyecciones" element={<ProtectedLayout><SoloAdmin><Estadisticas /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/mantenimiento" element={<ProtectedLayout><SoloAdmin><Mantenimiento /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/vehiculos" element={<ProtectedLayout><SoloAdmin><Vehiculos /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/clientes" element={<ProtectedLayout><SoloAdmin><Clientes /></SoloAdmin></ProtectedLayout>} />
+      <Route path="/usuarios" element={<ProtectedLayout><SoloAdmin><Usuarios /></SoloAdmin></ProtectedLayout>} />
+
+      <Route path="*" element={<Navigate to={inicio} replace />} />
     </Routes>
   );
 }

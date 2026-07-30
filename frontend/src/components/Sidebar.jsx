@@ -3,19 +3,22 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useVehicles } from '../context/VehicleContext';
 
+// `roles` indica quién ve cada opción. Sin `roles` = visible para todos.
 const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard' },
+  { path: '/dashboard', label: 'Dashboard', roles: ['admin'] },
   { path: '/registro-diario', label: 'Registro Diario' },
-  { path: '/pagos', label: 'Pagos y Liquidación' },
-  { path: '/estadisticas', label: 'Estadísticas' },
-  { path: '/proyecciones', label: 'Proyecciones' },
-  { path: '/mantenimiento', label: 'Mantenimiento' },
-  { path: '/clientes', label: 'Clientes' },
-  { path: '/vehiculos', label: 'Vehículos' },
+  { path: '/pagos', label: 'Pagos y Liquidación', roles: ['admin'] },
+  { path: '/estadisticas', label: 'Estadísticas', roles: ['admin'] },
+  { path: '/proyecciones', label: 'Proyecciones', roles: ['admin'] },
+  { path: '/mantenimiento', label: 'Mantenimiento', roles: ['admin'] },
+  { path: '/clientes', label: 'Clientes', roles: ['admin'] },
+  { path: '/vehiculos', label: 'Vehículos', roles: ['admin'] },
+  { path: '/usuarios', label: 'Usuarios y Accesos', roles: ['admin'] },
+  { path: '/mi-cuenta', label: 'Mi cuenta' },
 ];
 
 export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
-  const { user, logout } = useAuth();
+  const { user, logout, rol, esConductor } = useAuth();
   const { selectedVehicle, vehicles, setSelectedVehicle } = useVehicles();
   const navigate = useNavigate();
 
@@ -135,12 +138,12 @@ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
         fontSize: '10.5px', letterSpacing: '0.14em',
         textTransform: 'uppercase', color: '#5B6672', marginBottom: '14px',
       }}>
-        Contabilidad
+        {esConductor ? 'Mi operación' : 'Contabilidad'}
       </div>
 
       {/* Navigation */}
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '32px' }}>
-        {NAV_ITEMS.map(item => (
+        {NAV_ITEMS.filter(item => !item.roles || item.roles.includes(rol)).map(item => (
           <NavLink
             key={item.path}
             to={item.path}
@@ -202,6 +205,18 @@ export default function Sidebar({ isMobile = false, isOpen = false, onClose }) {
           <span style={{ fontSize: '16px' }}>↩</span>
           Cerrar sesión · {user?.nombre?.split(' ')[0]}
         </button>
+        {/* Distintivo de rol: deja claro con qué permisos se está trabajando */}
+        <div style={{
+          marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '10.5px', letterSpacing: '0.12em', textTransform: 'uppercase',
+          color: esConductor ? '#8FD9B0' : '#C5C6C7',
+        }}>
+          <span style={{
+            width: '6px', height: '6px', borderRadius: '50%',
+            background: esConductor ? '#8FD9B0' : '#C5C6C7', flexShrink: 0,
+          }} />
+          {esConductor ? 'Conductor' : 'Administrador'}
+        </div>
       </div>
     </aside>
   );

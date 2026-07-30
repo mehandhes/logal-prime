@@ -18,7 +18,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // GET /api/clientes/:id/resumen — ingresos históricos + anticipos
-router.get('/:id/resumen', auth, async (req, res) => {
+router.get('/:id/resumen', auth.soloAdmin, async (req, res) => {
   try {
     const cliente = await Cliente.findById(req.params.id);
     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });
@@ -45,7 +45,7 @@ router.get('/:id/resumen', auth, async (req, res) => {
 });
 
 // POST /api/clientes
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.soloAdmin, async (req, res) => {
   try {
     const cliente = await Cliente.create(req.body);
     res.status(201).json(cliente);
@@ -55,7 +55,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // PUT /api/clientes/:id
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const cliente = await Cliente.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });
@@ -66,7 +66,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/clientes/:id  (baja lógica)
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const cliente = await Cliente.findByIdAndUpdate(req.params.id, { activo: false }, { new: true });
     if (!cliente) return res.status(404).json({ message: 'Cliente no encontrado.' });

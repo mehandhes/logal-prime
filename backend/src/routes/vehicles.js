@@ -25,7 +25,7 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // POST /api/vehicles
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.soloAdmin, async (req, res) => {
   try {
     const vehicle = new Vehicle(req.body);
     await vehicle.save();
@@ -39,7 +39,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // PUT /api/vehicles/:id
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const vehicle = await Vehicle.findByIdAndUpdate(
       req.params.id,
@@ -54,7 +54,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/vehicles/:id
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const vehicle = await Vehicle.findByIdAndDelete(req.params.id);
     if (!vehicle) return res.status(404).json({ message: 'Vehículo no encontrado.' });

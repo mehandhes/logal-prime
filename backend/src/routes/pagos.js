@@ -21,7 +21,7 @@ async function calcularLiquidacion({ vehiculoId, fechaInicio, fechaFin, tipoLiqu
 }
 
 // GET /api/pagos
-router.get('/', auth, async (req, res) => {
+router.get('/', auth.soloAdmin, async (req, res) => {
   try {
     const { vehiculo, estado, limit = 20, page = 1 } = req.query;
     const filter = {};
@@ -43,7 +43,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // GET /api/pagos/:id
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const pago = await Pago.findById(req.params.id)
       .populate('vehiculo')
@@ -56,7 +56,7 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // POST /api/pagos/previsualizar - calcula la liquidación SIN guardar (paso 2 del asistente)
-router.post('/previsualizar', auth, async (req, res) => {
+router.post('/previsualizar', auth.soloAdmin, async (req, res) => {
   try {
     const { registros, liq } = await calcularLiquidacion(req.body);
     if (registros.length === 0) return res.status(400).json({ message: 'No hay registros para este período.' });
@@ -78,7 +78,7 @@ router.post('/previsualizar', auth, async (req, res) => {
 });
 
 // POST /api/pagos/generar - genera y GUARDA la liquidación desde los registros
-router.post('/generar', auth, async (req, res) => {
+router.post('/generar', auth.soloAdmin, async (req, res) => {
   try {
     const {
       vehiculoId, fechaInicio, fechaFin, tipo = 'quincenal',
@@ -118,7 +118,7 @@ router.post('/generar', auth, async (req, res) => {
 });
 
 // POST /api/pagos
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.soloAdmin, async (req, res) => {
   try {
     const pago = new Pago(req.body);
     await pago.save();
@@ -129,7 +129,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // PUT /api/pagos/:id
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const pago = await Pago.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!pago) return res.status(404).json({ message: 'Pago no encontrado.' });
@@ -140,7 +140,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/pagos/:id
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const pago = await Pago.findByIdAndDelete(req.params.id);
     if (!pago) return res.status(404).json({ message: 'Pago no encontrado.' });

@@ -5,7 +5,7 @@ const RegistroDiario = require('../models/RegistroDiario');
 const Mantenimiento = require('../models/Mantenimiento');
 
 // GET /api/stats/dashboard?vehiculo=&desde=&hasta=
-router.get('/dashboard', auth, async (req, res) => {
+router.get('/dashboard', auth.soloAdmin, async (req, res) => {
   try {
     const { vehiculo, desde, hasta } = req.query;
     const filter = {};
@@ -138,7 +138,7 @@ router.get('/dashboard', auth, async (req, res) => {
 });
 
 // GET /api/stats/historico?vehiculo=&meses=6
-router.get('/historico', auth, async (req, res) => {
+router.get('/historico', auth.soloAdmin, async (req, res) => {
   try {
     const { vehiculo, meses = 6 } = req.query;
     const filter = {};

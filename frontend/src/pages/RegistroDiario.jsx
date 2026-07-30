@@ -1,10 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import api, { fmt, fmtDate } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
+import { useAuth } from '../context/AuthContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { exportarRegistrosExcel, leerExcel, imprimirPDF } from '../utils/exportar';
 
 const TIPOS_INGRESO = ['Empresarial', 'Ejecutivo', 'Aeropuerto', 'Turismo', 'Otro'];
+
+// Espejo de la regla del backend (backend/src/routes/registros.js): el
+// conductor corrige su registro mientras sea de hoy o lleve menos de 6 horas
+// de creado. Aquí solo se usa para no mostrar un botón que va a fallar.
+const HORAS_GRACIA_EDICION = 6;
+const hoyBogota = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+
+function conductorPuedeEditar(r) {
+  if (!r) return false;
+  const esDeHoy = new Date(r.fecha).toISOString().slice(0, 10) === hoyBogota();
+  const horas = r.createdAt ? (Date.now() - new Date(r.createdAt).getTime()) / 3600000 : Infinity;
+  return esDeHoy || horas <= HORAS_GRACIA_EDICION;
+}
 
 const emptyForm = () => ({
   fecha: new Date().toISOString().split('T')[0],
@@ -83,6 +97,7 @@ function mapearFilaExcel(fila, vehiculo, clientes) {
 
 export default function RegistroDiario() {
   const { vehicles, selectedVehicle } = useVehicles();
+  const { esAdmin, esConductor } = useAuth();
   const isMobile = useIsMobile();
   const [registros, setRegistros] = useState([]);
   const [total, setTotal] = useState(0);
@@ -308,13 +323,20 @@ export default function RegistroDiario() {
             Movimientos
           </div>
           <h1 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif", fontWeight: 600, fontSize: isMobile ? '26px' : '32px', color: '#FFFFFF' }}>
-            Registro Diario
+            {esConductor ? 'Mis Registros' : 'Registro Diario'}
           </h1>
+          {esConductor && (
+            <div style={{ fontSize: '13px', color: '#8B98A3', marginTop: '6px' }}>
+              Reporta los ingresos y egresos del día. Puedes corregir el registro de hoy;
+              después solo lo ajusta el administrador.
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button onClick={() => setShowImport(true)} style={btnSecondary}>⭳ Importar Excel</button>
-          <button onClick={exportarExcel} style={btnSecondary} disabled={!registros.length}>⭱ Excel</button>
-          <button onClick={exportarPDF} style={btnSecondary} disabled={!registros.length}>🖶 PDF</button>
+          {/* Importar y exportar son herramientas de contabilidad: solo admin */}
+          {esAdmin && <button onClick={() => setShowImport(true)} style={btnSecondary}>⭳ Importar Excel</button>}
+          {esAdmin && <button onClick={exportarExcel} style={btnSecondary} disabled={!registros.length}>⭱ Excel</button>}
+          {esAdmin && <button onClick={exportarPDF} style={btnSecondary} disabled={!registros.length}>🖶 PDF</button>}
           <button onClick={openNuevo} style={btnPrimary}>+ Nuevo Registro</button>
         </div>
       </div>
@@ -468,14 +490,18 @@ export default function RegistroDiario() {
                   <Input type="number" min="0" step="100" value={form.otros} onChange={e => setForm({ ...form, otros: e.target.value })} /></div>
               </div>
 
-              <SectionTitle>Kilometraje y pago al conductor</SectionTitle>
-              <div style={grid3}>
+              <SectionTitle>{esAdmin ? 'Kilometraje y pago al conductor' : 'Kilometraje'}</SectionTitle>
+              <div style={esAdmin ? grid3 : grid2}>
                 <div><Label>Km inicio</Label>
                   <Input type="number" min="0" value={form.kmInicio} onChange={e => setForm({ ...form, kmInicio: e.target.value })} /></div>
                 <div><Label>Km fin</Label>
                   <Input type="number" min="0" value={form.kmFin} onChange={e => setForm({ ...form, kmFin: e.target.value })} /></div>
-                <div><Label>Pago al conductor</Label>
-                  <Input type="number" min="0" step="100" value={form.pagoConductor} onChange={e => setForm({ ...form, pagoConductor: e.target.value })} /></div>
+                {/* El pago al conductor lo decide la empresa: el backend ignora
+                    este campo si lo envía un conductor. */}
+                {esAdmin && (
+                  <div><Label>Pago al conductor</Label>
+                    <Input type="number" min="0" step="100" value={form.pagoConductor} onChange={e => setForm({ ...form, pagoConductor: e.target.value })} /></div>
+                )}
               </div>
               <div style={{ marginTop: '10px', padding: '8px 14px', background: '#0B0C10', borderRadius: '8px', fontSize: '13px', display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#8B98A3' }}>Total Km del día:</span>
@@ -508,10 +534,12 @@ export default function RegistroDiario() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8B98A3', marginBottom: '4px' }}>
                     <span>Total egresos:</span><span style={{ color: '#C5C6C7' }}>{fmt(totalEgresosForm)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderTop: '1px solid rgba(197,198,199,0.1)', paddingTop: '8px', marginTop: '8px' }}>
-                    <span style={{ color: '#FFFFFF' }}>Saldo del día (utilidad):</span>
-                    <span style={{ color: (totalIngresosForm - totalEgresosForm) >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(totalIngresosForm - totalEgresosForm)}</span>
-                  </div>
+                  {esAdmin && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, borderTop: '1px solid rgba(197,198,199,0.1)', paddingTop: '8px', marginTop: '8px' }}>
+                      <span style={{ color: '#FFFFFF' }}>Saldo del día (utilidad):</span>
+                      <span style={{ color: (totalIngresosForm - totalEgresosForm) >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(totalIngresosForm - totalEgresosForm)}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -534,16 +562,19 @@ export default function RegistroDiario() {
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(197,198,199,0.1)' }}>
-                {['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', 'Utilidad', ''].map(h => (
-                  <th key={h} style={thStyle}>{h}</th>
+                {(esAdmin
+                  ? ['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', 'Utilidad', '']
+                  : ['Fecha', 'Vehículo', 'Conductor', 'Tipo', 'Ingresos', 'Egresos', '']
+                ).map((h, i) => (
+                  <th key={`${h}-${i}`} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
+                <tr><td colSpan={esAdmin ? 8 : 7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>Cargando...</td></tr>
               ) : registros.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>
+                <tr><td colSpan={esAdmin ? 8 : 7} style={{ textAlign: 'center', padding: '40px', color: '#7C8994' }}>
                   Sin registros. ¡Agrega el primero!
                 </td></tr>
               ) : registros.map(r => (
@@ -556,10 +587,19 @@ export default function RegistroDiario() {
                   </td>
                   <td style={{ ...tdStyle, color: '#C5C6C7', fontWeight: 600 }}>{fmt(r.totalIngresos ?? r.ingresos?.valor)}</td>
                   <td style={{ ...tdStyle, color: '#93A0AB' }}>{fmt(r.totalEgresos)}</td>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: r.utilidadNeta >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(r.utilidadNeta)}</td>
+                  {esAdmin && (
+                    <td style={{ ...tdStyle, fontWeight: 600, color: r.utilidadNeta >= 0 ? '#8FD9B0' : '#f87171' }}>{fmt(r.utilidadNeta)}</td>
+                  )}
                   <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                    <button onClick={() => handleEdit(r)} style={iconBtn}>✏</button>
-                    <button onClick={() => handleDelete(r._id)} style={{ ...iconBtn, color: '#f87171' }}>✕</button>
+                    {(esAdmin || conductorPuedeEditar(r)) ? (
+                      <button onClick={() => handleEdit(r)} style={iconBtn} title="Editar">✏</button>
+                    ) : (
+                      <span title="Cerrado: pídele el ajuste al administrador"
+                        style={{ color: '#5B6672', fontSize: '13px', padding: '0 6px' }}>🔒</span>
+                    )}
+                    {esAdmin && (
+                      <button onClick={() => handleDelete(r._id)} style={{ ...iconBtn, color: '#f87171' }} title="Eliminar">✕</button>
+                    )}
                   </td>
                 </tr>
               ))}

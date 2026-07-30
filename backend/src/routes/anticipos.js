@@ -13,7 +13,7 @@ async function refrescarSaldoCliente(clienteId) {
 }
 
 // GET /api/anticipos?cliente=
-router.get('/', auth, async (req, res) => {
+router.get('/', auth.soloAdmin, async (req, res) => {
   try {
     const filter = {};
     if (req.query.cliente) filter.cliente = req.query.cliente;
@@ -25,7 +25,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // POST /api/anticipos — registra un adelanto (pasivo, NO ingreso del día)
-router.post('/', auth, async (req, res) => {
+router.post('/', auth.soloAdmin, async (req, res) => {
   try {
     const cliente = await Cliente.findById(req.body.cliente);
     if (!cliente) return res.status(400).json({ message: 'Cliente inválido.' });
@@ -43,7 +43,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // POST /api/anticipos/:id/aplicar — consume parte del anticipo contra un servicio
-router.post('/:id/aplicar', auth, async (req, res) => {
+router.post('/:id/aplicar', auth.soloAdmin, async (req, res) => {
   try {
     const monto = Number(req.body.monto) || 0;
     const anticipo = await Anticipo.findById(req.params.id);
@@ -66,7 +66,7 @@ router.post('/:id/aplicar', auth, async (req, res) => {
 });
 
 // DELETE /api/anticipos/:id
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth.soloAdmin, async (req, res) => {
   try {
     const anticipo = await Anticipo.findByIdAndDelete(req.params.id);
     if (!anticipo) return res.status(404).json({ message: 'Anticipo no encontrado.' });

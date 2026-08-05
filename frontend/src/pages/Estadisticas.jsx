@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, ReferenceLine
 } from 'recharts';
-import api, { fmt, fmtShort } from '../utils/api';
+import api, { fmt, fmtFontSize } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -14,7 +14,7 @@ const CustomTooltip = ({ active, payload, label }) => {
       <div style={{ color: '#8B98A3', marginBottom: '6px' }}>{label}</div>
       {payload.map(p => (
         <div key={p.name} style={{ color: p.color || '#FFFFFF', marginBottom: '2px' }}>
-          {p.name}: {typeof p.value === 'number' && p.value > 1000 ? fmtShort(p.value) : p.value}
+          {p.name}: {typeof p.value === 'number' && p.value > 1000 ? fmt(p.value) : p.value}
         </div>
       ))}
     </div>
@@ -78,9 +78,9 @@ export default function Estadisticas() {
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         {[
-          { label: 'Total período', value: fmtShort(resumen.totalPeriodo), sub: `últimos ${meses} meses` },
-          { label: 'Promedio mensual', value: fmtShort(resumen.promedioMensual), sub: 'ingresos' },
-          { label: 'Mejor mes', value: resumen.mejorMes?.label || '—', sub: resumen.mejorMes ? fmtShort(resumen.mejorMes.ingresos) : '' },
+          { label: 'Total período', value: fmt(resumen.totalPeriodo), sub: `últimos ${meses} meses` },
+          { label: 'Promedio mensual', value: fmt(resumen.promedioMensual), sub: 'ingresos' },
+          { label: 'Mejor mes', value: resumen.mejorMes?.label || '—', sub: resumen.mejorMes ? fmt(resumen.mejorMes.ingresos) : '' },
           {
             label: 'Margen promedio',
             value: historico.length > 0
@@ -89,9 +89,17 @@ export default function Estadisticas() {
             sub: 'utilidad / ingresos'
           }
         ].map(c => (
-          <div key={c.label} style={cardStyle}>
+          <div key={c.label} style={{ ...cardStyle, minWidth: 0 }}>
             <div style={{ fontSize: '12px', color: '#8B98A3', marginBottom: '10px' }}>{c.label}</div>
-            <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '24px', fontWeight: 600, color: '#FFFFFF' }}>
+            <div style={{
+              fontFamily: "'Montserrat', sans-serif",
+              // 10 caracteres caben holgados a 24px en la columna mínima (200px)
+              fontSize: fmtFontSize(c.value, 24, 10),
+              fontWeight: 600,
+              color: '#FFFFFF',
+              whiteSpace: 'nowrap',
+              letterSpacing: '-0.01em'
+            }}>
               {c.value}
             </div>
             {c.sub && <div style={{ fontSize: '11.5px', color: '#7C8994', marginTop: '4px' }}>{c.sub}</div>}

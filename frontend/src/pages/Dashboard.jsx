@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Cell, LineChart, Line
 } from 'recharts';
-import api, { fmt, fmtShort, fmtDate } from '../utils/api';
+import api, { fmt, fmtDate, fmtFontSize } from '../utils/api';
 import { useVehicles } from '../context/VehicleContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -15,15 +15,19 @@ function KPICard({ label, value, delta, sub, deltaPositive }) {
       background: '#151920',
       border: '1px solid rgba(197,198,199,0.1)',
       borderRadius: '14px',
-      padding: '20px 22px'
+      padding: '20px 22px',
+      minWidth: 0
     }}>
       <div style={{ fontSize: '12px', color: '#8B98A3', marginBottom: '14px', fontWeight: 500 }}>{label}</div>
       <div style={{
         fontFamily: "'Montserrat', sans-serif",
-        fontSize: '27px',
+        // 9 caracteres ("$147.000") caben holgados a 27px en la columna mínima (190px)
+        fontSize: fmtFontSize(value, 27, 9),
         fontWeight: 600,
         color: '#FFFFFF',
-        marginBottom: '10px'
+        marginBottom: '10px',
+        whiteSpace: 'nowrap',
+        letterSpacing: '-0.01em'
       }}>
         {value}
       </div>
@@ -54,7 +58,7 @@ const CustomTooltip = ({ active, payload, label }) => {
       <div style={{ color: '#8B98A3', marginBottom: '6px' }}>{label}</div>
       {payload.map(p => (
         <div key={p.name} style={{ color: p.color || '#FFFFFF', marginBottom: '2px' }}>
-          {p.name}: {fmtShort(p.value)}
+          {p.name}: {fmt(p.value)}
         </div>
       ))}
     </div>
@@ -125,29 +129,29 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '16px', marginBottom: '16px' }}>
         <KPICard
           label="Ingresos período"
-          value={fmtShort(kpis.totalIngresos)}
+          value={fmt(kpis.totalIngresos)}
           delta={`${kpis.totalViajes} viajes`}
           deltaPositive={null}
           sub="total"
         />
         <KPICard
           label="Egresos período"
-          value={fmtShort(kpis.totalEgresos)}
+          value={fmt(kpis.totalEgresos)}
           delta={`${kpis.totalKm} km`}
           sub="recorridos"
           deltaPositive={null}
         />
         <KPICard
           label="Utilidad operativa"
-          value={fmtShort(kpis.utilidadOperativa ?? kpis.utilidadNeta)}
+          value={fmt(kpis.utilidadOperativa ?? kpis.utilidadNeta)}
           delta={`${kpis.margenPct}% margen`}
           deltaPositive={(kpis.utilidadOperativa ?? kpis.utilidadNeta) >= 0}
           sub="ingresos − egresos"
         />
         <KPICard
           label="Neto empresa"
-          value={fmtShort(kpis.netoEmpresa ?? (kpis.utilidadNeta - (kpis.pagosConductor || 0)))}
-          delta={`conductor: ${fmtShort(kpis.pagosConductor || 0)}`}
+          value={fmt(kpis.netoEmpresa ?? (kpis.utilidadNeta - (kpis.pagosConductor || 0)))}
+          delta={`conductor: ${fmt(kpis.pagosConductor || 0)}`}
           deltaPositive={(kpis.netoEmpresa ?? 0) >= 0}
           sub="después de pagar conductor"
         />
@@ -171,7 +175,7 @@ export default function Dashboard() {
         />
         <KPICard
           label="Proyección semanal"
-          value={fmtShort(kpis.proyeccionSemanal)}
+          value={fmt(kpis.proyeccionSemanal)}
           delta="tendencia"
           sub="ingreso estimado"
           deltaPositive={null}
@@ -289,10 +293,10 @@ export default function Dashboard() {
             fontFamily: "'Montserrat', sans-serif",
             fontSize: '24px', fontWeight: 600, color: '#FFFFFF', marginBottom: '6px'
           }}>
-            {fmtShort(kpis.proyeccionSemanal)}
+            {fmt(kpis.proyeccionSemanal)}
           </div>
           <div style={{ fontSize: '12px', color: '#7C8994', marginBottom: '16px' }}>
-            Utilidad neta: {fmtShort(kpis.utilidadNeta)}
+            Utilidad neta: {fmt(kpis.utilidadNeta)}
           </div>
           <div style={{ height: '8px', borderRadius: '4px', background: 'rgba(197,198,199,0.1)', overflow: 'hidden', marginBottom: '10px' }}>
             <div style={{
